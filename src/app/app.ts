@@ -7,7 +7,7 @@ import {
   HostListener,
   Renderer2,
 } from '@angular/core';
-import { StarfieldService } from './starfield.service';
+import { StarfieldRendererService } from './services/starfield-renderer.service';
 import { ZoomControlComponent } from './zoom-control/zoom-control.component';
 
 /**
@@ -23,7 +23,7 @@ type ZoomSpec = { id: string; name: string; unit: number };
   imports: [ZoomControlComponent],
 })
 export class App implements AfterViewInit, OnDestroy {
-  constructor(private stars: StarfieldService, private r2: Renderer2) {}
+  constructor(private starRender: StarfieldRendererService, private r2: Renderer2) {}
 
   // ──────────────────────────────────────────────────────────────────────────────
   // View bindings
@@ -148,13 +148,6 @@ export class App implements AfterViewInit, OnDestroy {
   // ──────────────────────────────────────────────────────────────────────────────
 
   private dpr = Math.max(1, window.devicePixelRatio || 1);
-  private patternSize = 512; // star tile size
-  private pattern!: CanvasPattern;
-  private tile!: HTMLCanvasElement;
-
-  // Parallax factors (CSS px → pattern movement)
-  private parallaxX = 0.06;
-  private parallaxY = 0.14;
 
   // Device/CSS sizes (kept in sync via applySize)
   private DPR = 1;
@@ -168,7 +161,7 @@ export class App implements AfterViewInit, OnDestroy {
   // Grid/HUD config (CSS px values)
   private GRID = {
     spacingCSS: 0, // px between ticks at current TL.unitYears
-    targetVisible: 4, // ~visible tick count target
+    targetVisible: 6, // ~visible tick count target
     topGapCSS: 40, // top gutter
     color: 'rgba(255,150,60,0.55)',
     thicknessCSS: 2,
@@ -252,10 +245,9 @@ export class App implements AfterViewInit, OnDestroy {
     // Build HUD canvases (insert before centerline for correct z-order)
     this.buildHudLayers();
 
-    // Starfield pattern setup
-    const sctx = this.starCanvas.nativeElement.getContext('2d')!;
-    this.tile = this.stars.createStarTile('SPT-1234', this.patternSize);
-    this.pattern = sctx.createPattern(this.tile, 'repeat')!;
+    // Starfield renderer
+    this.starRender.init(this.starCanvas.nativeElement, 512);
+    this.starRender.setDevicePixelRatio(this.DPR);
 
     // Initial sizing
     this.sizeAll();
@@ -403,12 +395,14 @@ export class App implements AfterViewInit, OnDestroy {
       this.ensureScrollRoomFromBounds();
 
       if (this.useVirtualWindow) {
-        // Keep star phase continuous if we re-center the scrollbar
+        // Keep star phase visually continuous when we recenter the scrollbar
         const mid = ((this.SCROLL_MIN ?? 0) + (this.SCROLL_MAX ?? 0)) * 0.5;
-        this.rebaseStarPhaseForProgrammaticScroll(window.scrollX || window.pageXOffset || 0, mid);
+        const sx = window.scrollX || window.pageXOffset || 0;
+        this.starRender.rebasePhaseForProgrammaticScroll(sx, mid);
+
         window.scrollTo(0, mid);
         this.reanchorGridForCenter(keepYear);
-        this.starParallaxScrollX = window.scrollX || window.pageXOffset || 0;
+        this.starParallaxScrollX = sx;
         this.starParallaxScrollY = mid;
       } else {
         const y = this.scrollForYear(keepYear) + this.SCROLL_SHIFT;
@@ -546,6 +540,7 @@ export class App implements AfterViewInit, OnDestroy {
   /** Apply sizes to all canvases; compute DPR-scaled device sizes and grid spacing. */
   private applySize(cssW: number, cssH: number) {
     this.DPR = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+    this.starRender.setDevicePixelRatio(this.DPR);
     const Wn = Math.floor(cssW * this.DPR);
     const Hn = Math.floor(cssH * this.DPR);
     this.W = Wn;
@@ -851,72 +846,15 @@ export class App implements AfterViewInit, OnDestroy {
 
   /** Top-level redraw: starfield, HUDs, centerline, timeline. */
   private redraw(fadeFrom = 1, fadeTo = 0) {
-    this.drawStarfield(fadeFrom, fadeTo);
+    // Stars
+    this.starRender.setParallaxScroll(this.starParallaxScrollX, this.starParallaxScrollY);
+    this.starRender.setScale(this.starEffectiveScale);
+    this.starRender.draw(this.viewportW(), this.viewportH());
+
+    // HUDs + overlays
     this.drawHuds(fadeFrom, fadeTo);
     this.drawCenterline();
     this.drawTimeline();
-  }
-
-  /** Draw the starfield with pattern transform and parallax. */
-  private drawStarfield(_fadeFrom = 1, _fadeTo = 0) {
-    const star = this.starCanvas.nativeElement;
-    const ctx = star.getContext('2d')!;
-    if (!this.pattern) return;
-
-    // Clear in device px, then render in CSS px
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, this.W, this.H);
-    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-
-    // Use fixed host for sizing (independent of document height)
-    const host = this.starHost?.nativeElement;
-    const vw = (host?.clientWidth ?? window.innerWidth) || this.W / this.dpr;
-    const vh = (host?.clientHeight ?? window.innerHeight) || this.H / this.dpr;
-    const cx = vw / 2,
-      cy = vh / 2;
-
-    const mod = (a: number, m: number) => ((a % m) + m) % m;
-
-    // Parallax phase (CSS px): frozen during zoom; otherwise resume with base
-    let offX: number, offY: number;
-    if (this.starZoom.active) {
-      offX = this.starZoom.lockOffX;
-      offY = this.starZoom.lockOffY;
-    } else {
-      const sx = this.starParallaxScrollX;
-      const sy = this.starParallaxScrollY;
-      offX = mod(-(sx * this.parallaxX) + this.starPhaseBaseX, this.patternSize);
-      offY = mod(-(sy * this.parallaxY) + this.starPhaseBaseY, this.patternSize);
-    }
-
-    // Effective density (pattern scale)
-    const scale = this.starEffectiveScale || 1;
-
-    // Pattern transform centered in the viewport — no lateral motion while scaling
-    const pat = this.pattern;
-    const canSet = typeof (pat as any).setTransform === 'function';
-
-    if (canSet) {
-      const m = new DOMMatrix();
-      m.translateSelf(cx, cy);
-      m.scaleSelf(scale, scale);
-      m.translateSelf(-cx, -cy);
-      m.translateSelf(offX, offY);
-      (pat as any).setTransform(m);
-      ctx.fillStyle = pat;
-      ctx.fillRect(0, 0, vw, vh);
-    } else {
-      // Fallback path
-      ctx.save();
-      ctx.translate(cx, cy);
-      ctx.scale(scale, scale);
-      ctx.translate(-cx, -cy);
-      ctx.translate(offX, offY);
-      ctx.fillStyle = pat;
-      const pad = this.patternSize * 2;
-      ctx.fillRect(-pad, -pad, vw + pad * 2, vh + pad * 2);
-      ctx.restore();
-    }
   }
 
   /** Draw a single HUD layer (tick marks + labels) for a given unit size. */
@@ -1303,28 +1241,6 @@ export class App implements AfterViewInit, OnDestroy {
   }
 
   /**
-   * Adjust starPhaseBase* so that after a programmatic scroll to (newSx,newSy),
-   * the visible star phase remains unchanged (no jump).
-   */
-  private rebaseStarPhaseForProgrammaticScroll(newSx: number, newSy: number) {
-    const mod = (a: number, m: number) => ((a % m) + m) % m;
-
-    let offX: number, offY: number;
-    if (this.starZoom.active) {
-      offX = this.starZoom.lockOffX;
-      offY = this.starZoom.lockOffY;
-    } else {
-      const sx = window.scrollX || window.pageXOffset || 0;
-      const sy = window.scrollY || window.pageYOffset || 0;
-      offX = mod(-(sx * this.parallaxX) + this.starPhaseBaseX, this.patternSize);
-      offY = mod(-(sy * this.parallaxY) + this.starPhaseBaseY, this.patternSize);
-    }
-
-    this.starPhaseBaseX = mod(offX + newSx * this.parallaxX, this.patternSize);
-    this.starPhaseBaseY = mod(offY + newSy * this.parallaxY, this.patternSize);
-  }
-
-  /**
    * Flip the scrollbar handle to the opposite side of the virtual window,
    * preserving the center date and star phase.
    */
@@ -1341,9 +1257,8 @@ export class App implements AfterViewInit, OnDestroy {
     const sxNew = window.scrollX || window.pageXOffset || 0;
 
     // Keep on-screen star phase identical after the jump
-    this.rebaseStarPhaseForProgrammaticScroll(sxNew, target);
+    this.starRender.rebasePhaseForProgrammaticScroll(sxNew, target);
 
-    // Guard against re-entrant onScroll during our own jump
     this.settingScroll = true;
     window.scrollTo(0, target);
     this.settingScroll = false;
@@ -1365,7 +1280,7 @@ export class App implements AfterViewInit, OnDestroy {
     const m = mid ?? ((this.SCROLL_MIN ?? 0) + (this.SCROLL_MAX ?? 0)) * 0.5;
     const sxNew = window.scrollX || window.pageXOffset || 0;
 
-    this.rebaseStarPhaseForProgrammaticScroll(sxNew, m);
+    this.starRender.rebasePhaseForProgrammaticScroll(sxNew, m);
 
     this.settingScroll = true;
     window.scrollTo(0, m);
@@ -1445,14 +1360,14 @@ export class App implements AfterViewInit, OnDestroy {
     idx = this.clampZoomIndex(idx);
     if (idx === this.currentZoomIdx) return;
 
-    // If a tween is in-flight, snap-to-end first
+    // If a tween is already running, snap to its end first.
     if (this.ZOOM_ANIM.active) {
       this.TL.unitYears = this.ZOOM_ANIM.endUnit;
       this.currentZoomIdx = this.ZOOM_ANIM.targetIdx;
       this.ZOOM_ANIM.active = false;
     }
 
-    // Preserve date under the centerline (clamped to dataset)
+    // Preserve the date under the centerline (clamped to dataset).
     const keepYear = this.centerYF ?? this.yToYearDev(this.CH / 2);
     this.centerYF = this.clampCenterToData(keepYear);
 
@@ -1462,28 +1377,19 @@ export class App implements AfterViewInit, OnDestroy {
     this.animFromIdx = this.currentZoomIdx;
     this.animToIdx = idx;
 
-    // Freeze star parallax phase and set density tween
-    {
-      const sx = window.scrollX || window.pageXOffset || 0;
-      const sy = window.scrollY || window.pageYOffset || 0;
-      const mod = (a: number, m: number) => ((a % m) + m) % m;
+    // Freeze star parallax phase and get density endpoints from the renderer.
+    const lock = this.starRender.freezePhaseForZoom(
+      this.starBaseScaleByLevel[this.currentZoomIdx],
+      this.starBaseScaleByLevel[idx]
+    );
+    this.starZoom.active = true;
+    this.starZoom.from = lock.fromScale;
+    this.starZoom.to = lock.toScale;
+    this.starZoom.lockOffX = lock.lockOffX;
+    this.starZoom.lockOffY = lock.lockOffY;
+    this.starEffectiveScale = this.starZoom.from;
 
-      this.starZoom.active = true;
-      this.starZoom.from = this.starBaseScaleByLevel[this.currentZoomIdx];
-      this.starZoom.to = this.starBaseScaleByLevel[idx];
-
-      this.starZoom.startSx = sx;
-      this.starZoom.startSy = sy;
-
-      const currentOffX = mod(-(sx * this.parallaxX) + this.starPhaseBaseX, this.patternSize);
-      const currentOffY = mod(-(sy * this.parallaxY) + this.starPhaseBaseY, this.patternSize);
-      this.starZoom.lockOffX = currentOffX;
-      this.starZoom.lockOffY = currentOffY;
-
-      this.starEffectiveScale = this.starZoom.from;
-    }
-
-    // Remove class-driven opacity; we’ll drive inline opacity for the tween
+    // Prepare HUD cross-fade by removing CSS transitions and driving inline opacity.
     for (let i = 0; i < this.HUDS.length; i++) {
       const el = this.HUDS[i].el;
       el.classList.add('no-anim');
@@ -1491,6 +1397,7 @@ export class App implements AfterViewInit, OnDestroy {
       el.style.opacity = i === this.animFromIdx ? '1' : '0';
     }
 
+    // Start the zoom animation envelope.
     this.ZOOM_ANIM = {
       active: true,
       t0: performance && performance.now ? performance.now() : Date.now(),
@@ -1501,7 +1408,7 @@ export class App implements AfterViewInit, OnDestroy {
       targetIdx: idx,
     };
 
-    // Draw exact first frame before rAF (from=1, to=0)
+    // Draw exact first frame (from=1, to=0) before rAF.
     this.redraw(1, 0);
     requestAnimationFrame(this.zoomTick);
   }
@@ -1578,13 +1485,8 @@ export class App implements AfterViewInit, OnDestroy {
     this.starZoom.active = false;
     this.starEffectiveScale = this.starBaseScaleByLevel[this.currentZoomIdx];
 
-    {
-      const sx = window.scrollX || window.pageXOffset || 0;
-      const sy = window.scrollY || window.pageYOffset || 0;
-      const mod = (a: number, m: number) => ((a % m) + m) % m;
-      this.starPhaseBaseX = mod(this.starZoom.lockOffX + sx * this.parallaxX, this.patternSize);
-      this.starPhaseBaseY = mod(this.starZoom.lockOffY + sy * this.parallaxY, this.patternSize);
-    }
+    // Let the renderer compute the persistent base so stars don't jump
+    this.starRender.endZoomFreezeAndMatchPhase();
 
     // Final single-tier draw
     this.redraw();
