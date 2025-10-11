@@ -1,0 +1,21 @@
+<!-- fixed, viewport-pinned star container -->
+<div #starHost class="starhost">
+  <canvas #starCanvas class="starcanvas"></canvas>
+</div>
+
+<!-- Centerline + timeline on top -->
+<canvas #centerline id="centerline" class="layer"></canvas>
+<canvas #timeline id="timeline" class="layer"></canvas>
+
+<!-- Scroller to provide vertical space (height set in TS) -->
+<main class="demo"></main>
+
+<!-- Zoom UI -->
+<app-zoom-control
+  [labels]="zoomLabels"
+  [min]="0"
+  [max]="zoomLevels.length - 1"
+  [value]="currentZoomIdx"
+  (inputValue)="onZoomInput($event)"
+  (valueChange)="onZoomChange($event)"
+/>
