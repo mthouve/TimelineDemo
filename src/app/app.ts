@@ -87,6 +87,9 @@ export class App implements AfterViewInit, OnDestroy {
   // Tracks the last committed scrollY we consider "authoritative"
   private lastScrollY = 0;
 
+  // Keep some breathing room from the extremes when we hop sides
+  private readonly EDGE_PAD = 32; // CSS px (we'll also scale a bit with viewport)
+
   // Runtime-created HUD canvases
   private HUDS: {
     el: HTMLCanvasElement;
@@ -1250,14 +1253,18 @@ export class App implements AfterViewInit, OnDestroy {
     const nearTop = s <= min + this.EDGE_EPS;
     const nearBot = s >= max - this.EDGE_EPS;
 
-    // If we’re parked at dataset edges, don’t recenter (we want a frozen feel)
+    // If we’re parked at the dataset edges, don’t flip; we want a frozen feel
     if ((nearTop && this.atDatasetStart()) || (nearBot && this.atDatasetEnd())) return;
 
-    // Keep the same date under the centerline
+    // Keep the same date under the centerline across the jump
     const keep = this.centerYF ?? this.yToYearDev(this.CH / 2);
 
-    if (nearTop || nearBot) {
-      this.recenterToVirtualMid(keep);
+    if (nearTop) {
+      // User kept scrolling upward: move the handle to the bottom
+      this.jumpVirtualWindow(keep, 'bottom');
+    } else if (nearBot) {
+      // User kept scrolling downward: move the handle to the top
+      this.jumpVirtualWindow(keep, 'top');
     }
   }
 
@@ -1281,6 +1288,38 @@ export class App implements AfterViewInit, OnDestroy {
     this.starParallaxScrollX = sxNew;
     this.starParallaxScrollY = m;
     this.lastScrollY = m;
+
+    this.clampScroll();
+    this.redraw();
+  }
+
+  private jumpVirtualWindow(keepYear: number, towards: 'top' | 'bottom') {
+    const min = this.SCROLL_MIN ?? 0;
+    const max = this.SCROLL_MAX ?? 0;
+
+    // A little dynamic padding so we don't immediately retrigger at the edge
+    const vv = (window as any).visualViewport;
+    const vh = vv?.height || window.innerHeight || this.H / this.DPR;
+    const pad = Math.max(this.EDGE_PAD, Math.round(vh * 0.02)); // 2% or 32px, whichever larger
+
+    const target = towards === 'top' ? min + pad : max - pad;
+    const sxNew = window.scrollX || window.pageXOffset || 0;
+
+    // Keep on-screen star phase identical after the jump
+    this.rebaseStarPhaseForProgrammaticScroll(sxNew, target);
+
+    // Guard our own programmatic scroll
+    this.settingScroll = true;
+    window.scrollTo(0, target);
+    this.settingScroll = false;
+
+    // Re-anchor so the same date stays under the centerline
+    this.reanchorGridForCenter(keepYear);
+
+    // Sync parallax trackers and last known scroll
+    this.starParallaxScrollX = sxNew;
+    this.starParallaxScrollY = target;
+    this.lastScrollY = target;
 
     this.clampScroll();
     this.redraw();
