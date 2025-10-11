@@ -310,22 +310,6 @@ export class App implements AfterViewInit, OnDestroy {
     this.starParallaxScrollX = window.scrollX || window.pageXOffset || 0;
     this.starParallaxScrollY = window.scrollY || window.pageYOffset || 0;
 
-    // --- Virtual window normalization ---
-    if (this.useVirtualWindow) {
-      const keep = this.centerYF ?? this.yToYearDev(this.CH / 2);
-      const mid = ((this.SCROLL_MIN ?? 0) + (this.SCROLL_MAX ?? 0)) * 0.5;
-
-      this.rebaseStarPhaseForProgrammaticScroll(window.scrollX || window.pageXOffset || 0, mid);
-      window.scrollTo(0, mid);
-
-      this.starParallaxScrollX = window.scrollX || window.pageXOffset || 0;
-      this.starParallaxScrollY = mid;
-
-      this.reanchorGridForCenter(keep);
-      this.clampScroll();
-      this.redraw();
-    }
-
     // show active HUD (unchanged)
     for (const h of this.HUDS) {
       h.el.classList.add('hud-hidden', 'no-anim');
@@ -1157,9 +1141,23 @@ export class App implements AfterViewInit, OnDestroy {
     if (this.DID_AUTO_CENTER) return;
     const es = this.getEntries();
     if (!es.length) return;
+
     const target = es[0].yf;
-    const sTarget = this.scrollForYear(target);
-    window.scrollTo(0, sTarget + this.SCROLL_SHIFT);
+
+    if (this.useVirtualWindow) {
+      // ✅ First-load behavior for virtual window:
+      // Put the FIRST point under the centerline *without moving the scrollbar*.
+      this.centerYF = target;
+      this.reanchorGridForCenter(target);
+      this.updateScrollBounds();
+      this.ensureScrollRoomFromBounds();
+      // leave scrollY as-is (0 => scrollbar handle stays at the top)
+    } else {
+      // legacy non-virtual behavior
+      const sTarget = this.scrollForYear(target);
+      window.scrollTo(0, sTarget + this.SCROLL_SHIFT);
+    }
+
     this.DID_AUTO_CENTER = true;
   }
 
