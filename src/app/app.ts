@@ -90,6 +90,8 @@ export class App implements AfterViewInit, OnDestroy {
 
   private readonly EDGE_PAD = 32;
 
+  private readonly ONE_LEVEL_MS = 2500; // same feel as your single-level zoom
+
   // HUD canvas list
   private HUDS: Array<{
     el: HTMLCanvasElement;
@@ -878,31 +880,36 @@ export class App implements AfterViewInit, OnDestroy {
       const from = this.HUDS[this.animFromIdx];
       const to = this.HUDS[this.animToIdx];
 
-      // debug what we’re about to apply
+      // Use the *current step's* units, not the whole-jump units
+      const fromUnit = this.ZOOM_ANIM.hudStartUnit ?? this.ZOOM_ANIM.startUnit;
+      const toUnit = this.ZOOM_ANIM.hudEndUnit ?? this.ZOOM_ANIM.endUnit;
+
+      // Debug visibility
       this.dbg('drawHuds(active)', {
         fromIdx: this.animFromIdx,
         toIdx: this.animToIdx,
-        startUnit: this.ZOOM_ANIM.startUnit,
-        endUnit: this.ZOOM_ANIM.endUnit,
+        fromUnit,
+        toUnit,
         fadeFrom: +fadeFrom.toFixed(2),
         fadeTo: +fadeTo.toFixed(2),
       });
 
+      // Clear only the two active layers
       from.ctx.clearRect(0, 0, this.W, this.H);
       to.ctx.clearRect(0, 0, this.W, this.H);
 
-      // Draw using the *current* mapping (grid stretches/contracts; labels stay centered)
-      this.drawHudLayer(from.ctx, this.W, this.H, this.ZOOM_ANIM.startUnit);
-      this.drawHudLayer(to.ctx, this.W, this.H, this.ZOOM_ANIM.endUnit);
+      // Draw ticks using the *current step's* pair units.
+      // TL.unitYears (set in zoomTick) controls the mapping/stretching.
+      this.drawHudLayer(from.ctx, this.W, this.H, fromUnit);
+      this.drawHudLayer(to.ctx, this.W, this.H, toUnit);
 
-      // Programmatic opacities
+      // Programmatic opacities for the active pair
       from.el.style.opacity = String(fadeFrom); // 1 → 0
       to.el.style.opacity = String(fadeTo); // 0 → 1
-
       return;
     }
 
-    // non-anim: single tier
+    // ── Non-anim: single active layer ──
     for (let i = 0; i < this.HUDS.length; i++) {
       const h = this.HUDS[i];
       h.ctx.clearRect(0, 0, this.W, this.H);
@@ -1230,10 +1237,12 @@ export class App implements AfterViewInit, OnDestroy {
     return idx;
   }
 
+  // ── Zoom logic: chained HUD steps @ capped speed; single smooth star/timeline ──
   private setZoomIndex(idx: number) {
     idx = this.clampZoomIndex(idx);
     if (idx === this.currentZoomIdx) return;
 
+    // If a tween is running, snap to end first
     if (this.ZOOM_ANIM.active) {
       this.TL.unitYears = this.ZOOM_ANIM.endUnit;
       this.currentZoomIdx = this.ZOOM_ANIM.targetIdx;
@@ -1248,9 +1257,11 @@ export class App implements AfterViewInit, OnDestroy {
     const startUnit = this.zoomLevels[startIdx].unit;
     const endUnit = this.zoomLevels[endIdx].unit;
 
-    this.dbg('START', { startIdx, endIdx, startUnit, endUnit });
+    const stepDir = endIdx > startIdx ? 1 : -1;
+    const steps = Math.abs(endIdx - startIdx); // number of HUD transitions
+    if (steps === 0) return;
 
-    // freeze star phase once, get density endpoints
+    // Freeze star phase ONCE for whole jump (single smooth star tween)
     const lock = this.starRender.freezePhaseForZoom(
       this.starBaseScaleByLevel[startIdx],
       this.starBaseScaleByLevel[endIdx]
@@ -1262,52 +1273,44 @@ export class App implements AfterViewInit, OnDestroy {
     this.starZoom.lockOffY = lock.lockOffY;
     this.starEffectiveScale = this.starZoom.from;
 
-    // Seed first boundary pair
+    // Prepare HUD layers: disable CSS transitions; seed first pair opacities
     const fromIdxSeed = startIdx;
-    const toIdxSeed = startIdx + (endIdx > startIdx ? 1 : -1);
-
-    // Prepare HUD layers: disable CSS transitions & set initial opacities for the two layers only
+    const toIdxSeed = startIdx + stepDir;
     for (let i = 0; i < this.HUDS.length; i++) {
       const el = this.HUDS[i].el;
       el.classList.add('no-anim');
       el.classList.remove('hud-visible', 'hud-hidden');
-      // only define explicit opacity for active pair; others leave as-is
       if (i === fromIdxSeed) el.style.opacity = '1';
       else if (i === toIdxSeed) el.style.opacity = '0';
     }
 
+    // Duration scales with number of steps so per-level speed matches single-level
+    const totalDur = this.ONE_LEVEL_MS * steps;
+
     this.ZOOM_ANIM = {
       active: true,
-      t0: performance && performance.now ? performance.now() : Date.now(),
-      dur: 2500,
+      t0: (performance && performance.now ? performance.now() : Date.now()) as number,
+      dur: totalDur,
       startUnit,
       endUnit,
       keepYear,
       targetIdx: endIdx,
 
-      starFromScale: this.starZoom.from,
-      starToScale: this.starZoom.to,
-
-      hudFromIdx: fromIdxSeed,
-      hudToIdx: toIdxSeed,
-      hudStartUnit: this.zoomLevels[fromIdxSeed]?.unit ?? startUnit,
-      hudEndUnit: this.zoomLevels[toIdxSeed]?.unit ?? endUnit,
-
+      // store step bookkeeping
       startIdx,
       endIdx,
+      hudFromIdx: fromIdxSeed,
+      hudToIdx: toIdxSeed,
+      hudStartUnit: this.zoomLevels[fromIdxSeed].unit,
+      hudEndUnit: this.zoomLevels[toIdxSeed].unit,
+      starFromScale: this.starZoom.from,
+      starToScale: this.starZoom.to,
     };
 
     this.animFromIdx = fromIdxSeed;
     this.animToIdx = toIdxSeed;
-    this.dbg('seed pair', {
-      hudFromIdx: this.ZOOM_ANIM.hudFromIdx,
-      hudToIdx: this.ZOOM_ANIM.hudToIdx,
-      hudStartUnit: this.ZOOM_ANIM.hudStartUnit,
-      hudEndUnit: this.ZOOM_ANIM.hudEndUnit,
-    });
-    this.markActiveHudLayers();
 
-    // first exact frame
+    // First exact frame
     this.TL.unitYears = startUnit;
     this.redraw(1, 0);
     requestAnimationFrame(this.zoomTick);
@@ -1315,7 +1318,7 @@ export class App implements AfterViewInit, OnDestroy {
 
   private easeOutCubic(t: number) {
     return 1 - Math.pow(1 - t, 3);
-  } // slows to stop
+  }
   private lerp(a: number, b: number, t: number) {
     return a + (b - a) * t;
   }
@@ -1323,15 +1326,13 @@ export class App implements AfterViewInit, OnDestroy {
   private zoomTick = () => {
     if (!this.ZOOM_ANIM.active) return;
 
-    const now = performance && performance.now ? performance.now() : Date.now();
+    const now = (performance && performance.now ? performance.now() : Date.now()) as number;
     let t = (now - this.ZOOM_ANIM.t0) / this.ZOOM_ANIM.dur;
     if (t < 0) t = 0;
     if (t > 1) t = 1;
 
-    const moveP = this.easeOutCubic(t); // smooth, slows at end
-    const starP = moveP; // single smooth star tween across whole jump
-
-    // Single smooth timeline scale
+    // Star/timeline: single smooth ease-out across the whole jump
+    const moveP = this.easeOutCubic(t);
     const unit = this.lerp(this.ZOOM_ANIM.startUnit, this.ZOOM_ANIM.endUnit, moveP);
     this.TL.unitYears = unit;
 
@@ -1341,70 +1342,56 @@ export class App implements AfterViewInit, OnDestroy {
     this.updateScrollBounds();
     this.ensureScrollRoomFromBounds();
 
-    // Star density tween (phase is frozen)
+    // Star density tween (phase frozen)
     this.starEffectiveScale = this.lerp(
       this.ZOOM_ANIM.starFromScale!,
       this.ZOOM_ANIM.starToScale!,
-      starP
+      moveP
     );
 
-    // HUD step: compute local fade progress between current pair
-    let localFade = 0;
-    const inc = this.ZOOM_ANIM.endIdx! > this.ZOOM_ANIM.startIdx!;
-    const a = this.ZOOM_ANIM.hudStartUnit!,
-      b = this.ZOOM_ANIM.hudEndUnit!;
-    if (inc) localFade = this.clamp((unit - a) / (b - a), 0, 1);
-    else localFade = this.clamp((a - unit) / (a - b), 0, 1);
+    // ── HUD chaining ──
+    const steps = Math.abs(this.ZOOM_ANIM.endIdx! - this.ZOOM_ANIM.startIdx!);
+    const stepDir = this.ZOOM_ANIM.endIdx! > this.ZOOM_ANIM.startIdx! ? 1 : -1;
+
+    // Use *linear time* to march through HUD steps so earlier steps don't ease
+    const s = t * steps; // 0..steps
+    let k = Math.floor(s); // current completed steps
+    if (k >= steps) k = steps - 1; // clamp to last segment
+    const local = s - k; // progress in current segment (0..1)
+
+    const curFromIdx = this.ZOOM_ANIM.startIdx! + k * stepDir;
+    const curToIdx = curFromIdx + stepDir;
+
+    // If we moved into a new pair, reset indices and opacities for the new pair
+    if (curFromIdx !== this.animFromIdx || curToIdx !== this.animToIdx) {
+      this.animFromIdx = curFromIdx;
+      this.animToIdx = curToIdx;
+      this.ZOOM_ANIM.hudFromIdx = curFromIdx;
+      this.ZOOM_ANIM.hudToIdx = curToIdx;
+      this.ZOOM_ANIM.hudStartUnit = this.zoomLevels[curFromIdx].unit;
+      this.ZOOM_ANIM.hudEndUnit = this.zoomLevels[curToIdx].unit;
+
+      // lock visibilities before starting this segment fade
+      this.HUDS[this.animFromIdx].el.style.opacity = '1';
+      this.HUDS[this.animToIdx].el.style.opacity = '0';
+    }
+
+    // Fade rule: linear for all intermediate steps; ease-out only for the final step
+    const isFinalStep = k === steps - 1;
+    const localFade = isFinalStep ? this.easeOutCubic(local) : local;
 
     const fadeFrom = 1 - localFade;
     const fadeTo = localFade;
 
-    this.dbg('frame', {
-      t: +t.toFixed(3),
-      moveP: +moveP.toFixed(3),
-      unit: +unit.toFixed(6),
-      hudFromIdx: this.animFromIdx,
-      hudToIdx: this.animToIdx,
-      fadeFrom: +fadeFrom.toFixed(2),
-      fadeTo: +fadeTo.toFixed(2),
-    });
-
     // Draw frame (stars + cross-fading HUDs + overlays)
     this.redraw(fadeFrom, fadeTo);
-
-    // Step to next pair if we finished this boundary and not yet at target
-    const finishedPair = localFade >= 0.999 && this.ZOOM_ANIM.hudToIdx !== this.ZOOM_ANIM.endIdx;
-    if (finishedPair) {
-      const nextFrom = this.ZOOM_ANIM.hudToIdx!;
-      const nextTo = nextFrom + (inc ? 1 : -1);
-
-      this.ZOOM_ANIM.hudFromIdx = nextFrom;
-      this.ZOOM_ANIM.hudToIdx = nextTo;
-      this.ZOOM_ANIM.hudStartUnit = this.zoomLevels[nextFrom].unit;
-      this.ZOOM_ANIM.hudEndUnit = this.zoomLevels[nextTo].unit;
-
-      this.animFromIdx = nextFrom;
-      this.animToIdx = nextTo;
-
-      // lock the new from layer fully visible, new to fully hidden before next fade
-      this.HUDS[this.animFromIdx].el.style.opacity = '1';
-      this.HUDS[this.animToIdx].el.style.opacity = '0';
-
-      this.dbg('STEP BOUNDARY → new pair', {
-        hudFromIdx: this.animFromIdx,
-        hudToIdx: this.animToIdx,
-        hudStartUnit: this.ZOOM_ANIM.hudStartUnit,
-        hudEndUnit: this.ZOOM_ANIM.hudEndUnit,
-      });
-      this.markActiveHudLayers();
-    }
 
     if (t < 1) {
       requestAnimationFrame(this.zoomTick);
       return;
     }
 
-    // Finish
+    // ── Finish ──
     this.TL.unitYears = this.ZOOM_ANIM.endUnit;
     this.currentZoomIdx = this.ZOOM_ANIM.targetIdx;
     this.ZOOM_ANIM.active = false;
@@ -1425,13 +1412,12 @@ export class App implements AfterViewInit, OnDestroy {
 
     this.starZoom.active = false;
     this.starEffectiveScale = this.starBaseScaleByLevel[this.currentZoomIdx];
-    // reconcile persistent star phase based on locked offsets
     this.starRender.endZoomFreezeAndMatchPhase();
 
-    // final draw
+    // Final draw
     this.redraw();
 
-    // Restore CSS-driven visibility
+    // Restore CSS-driven visibility for steady state
     for (let i = 0; i < this.HUDS.length; i++) {
       const el = this.HUDS[i].el;
       el.classList.remove('no-anim');
@@ -1439,7 +1425,5 @@ export class App implements AfterViewInit, OnDestroy {
       if (i === this.currentZoomIdx) el.classList.add('hud-visible');
       else el.classList.add('hud-hidden');
     }
-
-    this.dbg('FINISH', { currentZoomIdx: this.currentZoomIdx, finalUnit: this.TL.unitYears });
   };
 }
