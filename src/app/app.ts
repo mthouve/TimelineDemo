@@ -1242,7 +1242,7 @@ export class App implements AfterViewInit, OnDestroy {
     idx = this.clampZoomIndex(idx);
     if (idx === this.currentZoomIdx) return;
 
-    // If a tween is running, snap to end first
+    // Finish any running anim
     if (this.ZOOM_ANIM.active) {
       this.TL.unitYears = this.ZOOM_ANIM.endUnit;
       this.currentZoomIdx = this.ZOOM_ANIM.targetIdx;
@@ -1256,12 +1256,9 @@ export class App implements AfterViewInit, OnDestroy {
     const endIdx = idx;
     const startUnit = this.zoomLevels[startIdx].unit;
     const endUnit = this.zoomLevels[endIdx].unit;
+    const dir = endIdx > startIdx ? 1 : -1;
 
-    const stepDir = endIdx > startIdx ? 1 : -1;
-    const steps = Math.abs(endIdx - startIdx); // number of HUD transitions
-    if (steps === 0) return;
-
-    // Freeze star phase ONCE for whole jump (single smooth star tween)
+    // Freeze stars once for the whole jump
     const lock = this.starRender.freezePhaseForZoom(
       this.starBaseScaleByLevel[startIdx],
       this.starBaseScaleByLevel[endIdx]
@@ -1273,9 +1270,9 @@ export class App implements AfterViewInit, OnDestroy {
     this.starZoom.lockOffY = lock.lockOffY;
     this.starEffectiveScale = this.starZoom.from;
 
-    // Prepare HUD layers: disable CSS transitions; seed first pair opacities
+    // Seed first HUD pair (just for layer selection/opacity)
     const fromIdxSeed = startIdx;
-    const toIdxSeed = startIdx + stepDir;
+    const toIdxSeed = startIdx + dir;
     for (let i = 0; i < this.HUDS.length; i++) {
       const el = this.HUDS[i].el;
       el.classList.add('no-anim');
@@ -1284,28 +1281,58 @@ export class App implements AfterViewInit, OnDestroy {
       else if (i === toIdxSeed) el.style.opacity = '0';
     }
 
-    // Duration scales with number of steps so per-level speed matches single-level
-    const totalDur = this.ONE_LEVEL_MS * steps;
+    // Build the sequence of units across boundaries (e.g. 1000→100→10→1→1/12→1/365)
+    const unitsSeq: number[] = [];
+    for (let i = startIdx; i !== endIdx; i += dir) unitsSeq.push(this.zoomLevels[i].unit);
+    unitsSeq.push(this.zoomLevels[endIdx].unit);
+
+    // Per-step log distances (geometric distance). Guard against bad ratios.
+    const stepDist: number[] = [];
+    for (let i = 0; i < unitsSeq.length - 1; i++) {
+      const a = unitsSeq[i],
+        b = unitsSeq[i + 1];
+      const r = b / a;
+      const d = r > 0 && isFinite(r) ? Math.abs(Math.log(r)) : Math.abs(b - a); // fallback linear
+      stepDist.push(d);
+    }
+    const cumDist: number[] = [0];
+    for (let i = 0; i < stepDist.length; i++) cumDist.push(cumDist[i] + stepDist[i]);
+    const totalDist = cumDist[cumDist.length - 1] || 1;
+
+    const steps = Math.max(1, Math.abs(endIdx - startIdx));
+    const perStepMs = this.ONE_LEVEL_MS; // keep your single-level feel per boundary
+    const totalDur = perStepMs * steps; // HUD & stars share this duration
 
     this.ZOOM_ANIM = {
       active: true,
-      t0: (performance && performance.now ? performance.now() : Date.now()) as number,
+      t0: performance && performance.now ? performance.now() : Date.now(),
       dur: totalDur,
       startUnit,
       endUnit,
       keepYear,
       targetIdx: endIdx,
 
-      // store step bookkeeping
-      startIdx,
-      endIdx,
-      hudFromIdx: fromIdxSeed,
-      hudToIdx: toIdxSeed,
-      hudStartUnit: this.zoomLevels[fromIdxSeed].unit,
-      hudEndUnit: this.zoomLevels[toIdxSeed].unit,
       starFromScale: this.starZoom.from,
       starToScale: this.starZoom.to,
-    };
+
+      hudFromIdx: fromIdxSeed,
+      hudToIdx: toIdxSeed,
+      hudStartUnit: this.zoomLevels[fromIdxSeed]?.unit ?? startUnit,
+      hudEndUnit: this.zoomLevels[toIdxSeed]?.unit ?? endUnit,
+
+      startIdx,
+      endIdx,
+
+      // new: geometric path info
+      // @ts-ignore – extending the shape without changing its declared type
+      unitsSeq,
+      // @ts-ignore
+      stepDist,
+      // @ts-ignore
+      cumDist,
+      // @ts-ignore
+      totalDist,
+    } as any;
 
     this.animFromIdx = fromIdxSeed;
     this.animToIdx = toIdxSeed;
@@ -1326,67 +1353,91 @@ export class App implements AfterViewInit, OnDestroy {
   private zoomTick = () => {
     if (!this.ZOOM_ANIM.active) return;
 
-    const now = (performance && performance.now ? performance.now() : Date.now()) as number;
-    let t = (now - this.ZOOM_ANIM.t0) / this.ZOOM_ANIM.dur;
-    if (t < 0) t = 0;
-    if (t > 1) t = 1;
+    const now = performance && performance.now ? performance.now() : Date.now();
+    const elapsed = Math.max(0, now - this.ZOOM_ANIM.t0);
+    const totalMs = this.ZOOM_ANIM.dur;
+    const g = this.clamp(elapsed / totalMs, 0, 1); // single global clock
 
-    // Star/timeline: single smooth ease-out across the whole jump
-    const moveP = this.easeOutCubic(t);
-    const unit = this.lerp(this.ZOOM_ANIM.startUnit, this.ZOOM_ANIM.endUnit, moveP);
-    this.TL.unitYears = unit;
+    // Keep stars moving uniformly and only ease in the last bit.
+    const EASE_TAIL = 0.12; // last 12% gets a soft ease-out
+    let starP: number;
+    if (g <= 1 - EASE_TAIL) {
+      // strictly linear up to the tail so it never looks like it stalls
+      starP = g * (1 / (1 - EASE_TAIL)) * (1 - EASE_TAIL);
+    } else {
+      // gentle ease only in the last tail segment
+      const local = (g - (1 - EASE_TAIL)) / EASE_TAIL; // 0..1
+      starP = 1 - EASE_TAIL + this.easeOutCubic(local) * EASE_TAIL;
+    }
 
+    // Geometric HUD path (continuous across all steps)
+    const unitsSeq: number[] = (this.ZOOM_ANIM as any).unitsSeq;
+    const stepDist: number[] = (this.ZOOM_ANIM as any).stepDist;
+    const cumDist: number[] = (this.ZOOM_ANIM as any).cumDist;
+    const totalDist: number = (this.ZOOM_ANIM as any).totalDist || 1;
+
+    // Distance we should have covered by now along the piecewise-log path
+    const dTarget = g * totalDist;
+
+    // Find current segment i such that cumDist[i] <= dTarget <= cumDist[i+1]
+    let i = 0;
+    while (i < stepDist.length - 1 && dTarget > cumDist[i + 1]) i++;
+
+    const dSeg = stepDist[i] || 1e-6;
+    const segT = this.clamp((dTarget - cumDist[i]) / dSeg, 0, 1);
+
+    const a = unitsSeq[i];
+    const b = unitsSeq[i + 1];
+    const r = b > 0 && a > 0 ? b / a : 1; // guard
+    // geometric interpolation: u = a * r^segT
+    const unitThisFrame =
+      r > 0 && isFinite(r) ? a * Math.exp(Math.log(r) * segT) : this.lerp(a, b, segT); // fallback linear if something goes weird
+
+    this.TL.unitYears = unitThisFrame;
+
+    // Keep the same date under the centerline
     const ky = this.ZOOM_ANIM.keepYear!;
     this.centerYF = this.clampCenterToData(ky);
     this.reanchorGridForCenter(ky);
-    this.updateScrollBounds();
-    this.ensureScrollRoomFromBounds();
 
-    // Star density tween (phase frozen)
+    // Stars follow the global progress
     this.starEffectiveScale = this.lerp(
       this.ZOOM_ANIM.starFromScale!,
       this.ZOOM_ANIM.starToScale!,
-      moveP
+      starP
     );
 
-    // ── HUD chaining ──
-    const steps = Math.abs(this.ZOOM_ANIM.endIdx! - this.ZOOM_ANIM.startIdx!);
-    const stepDir = this.ZOOM_ANIM.endIdx! > this.ZOOM_ANIM.startIdx! ? 1 : -1;
+    // HUD pair selection and fade based on current segment
+    const startIdx = this.ZOOM_ANIM.startIdx!;
+    const endIdx = this.ZOOM_ANIM.endIdx!;
+    const dir = endIdx > startIdx ? 1 : -1;
 
-    // Use *linear time* to march through HUD steps so earlier steps don't ease
-    const s = t * steps; // 0..steps
-    let k = Math.floor(s); // current completed steps
-    if (k >= steps) k = steps - 1; // clamp to last segment
-    const local = s - k; // progress in current segment (0..1)
+    const curFromIdx = startIdx + i * dir;
+    const curToIdx = curFromIdx + dir;
 
-    const curFromIdx = this.ZOOM_ANIM.startIdx! + k * stepDir;
-    const curToIdx = curFromIdx + stepDir;
-
-    // If we moved into a new pair, reset indices and opacities for the new pair
     if (curFromIdx !== this.animFromIdx || curToIdx !== this.animToIdx) {
-      this.animFromIdx = curFromIdx;
-      this.animToIdx = curToIdx;
       this.ZOOM_ANIM.hudFromIdx = curFromIdx;
       this.ZOOM_ANIM.hudToIdx = curToIdx;
       this.ZOOM_ANIM.hudStartUnit = this.zoomLevels[curFromIdx].unit;
       this.ZOOM_ANIM.hudEndUnit = this.zoomLevels[curToIdx].unit;
-
-      // lock visibilities before starting this segment fade
+      this.animFromIdx = curFromIdx;
+      this.animToIdx = curToIdx;
       this.HUDS[this.animFromIdx].el.style.opacity = '1';
       this.HUDS[this.animToIdx].el.style.opacity = '0';
     }
 
-    // Fade rule: linear for all intermediate steps; ease-out only for the final step
-    const isFinalStep = k === steps - 1;
-    const localFade = isFinalStep ? this.easeOutCubic(local) : local;
+    // Cross-fade strictly by segT (0..1) so no “heartbeat” at boundaries
+    const fadeTo = segT;
+    const fadeFrom = 1 - fadeTo;
 
-    const fadeFrom = 1 - localFade;
-    const fadeTo = localFade;
-
-    // Draw frame (stars + cross-fading HUDs + overlays)
+    // Draw
     this.redraw(fadeFrom, fadeTo);
 
-    if (t < 1) {
+    // Maintain bounds while the mapping changes
+    this.updateScrollBounds();
+    this.ensureScrollRoomFromBounds();
+
+    if (elapsed < totalMs) {
       requestAnimationFrame(this.zoomTick);
       return;
     }
@@ -1414,15 +1465,13 @@ export class App implements AfterViewInit, OnDestroy {
     this.starEffectiveScale = this.starBaseScaleByLevel[this.currentZoomIdx];
     this.starRender.endZoomFreezeAndMatchPhase();
 
-    // Final draw
     this.redraw();
 
-    // Restore CSS-driven visibility for steady state
-    for (let i = 0; i < this.HUDS.length; i++) {
-      const el = this.HUDS[i].el;
+    for (let j = 0; j < this.HUDS.length; j++) {
+      const el = this.HUDS[j].el;
       el.classList.remove('no-anim');
       el.style.opacity = '';
-      if (i === this.currentZoomIdx) el.classList.add('hud-visible');
+      if (j === this.currentZoomIdx) el.classList.add('hud-visible');
       else el.classList.add('hud-hidden');
     }
   };
