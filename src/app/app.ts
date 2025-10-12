@@ -10,9 +10,6 @@ import {
 import { StarfieldRendererService } from './services/starfield-renderer.service';
 import { ZoomControlComponent } from './zoom-control/zoom-control.component';
 
-/**
- * Zoom tier definition (HUD layer + scale unit).
- */
 type ZoomSpec = { id: string; name: string; unit: number };
 
 @Component({
@@ -25,21 +22,37 @@ type ZoomSpec = { id: string; name: string; unit: number };
 export class App implements AfterViewInit, OnDestroy {
   constructor(private starRender: StarfieldRendererService, private r2: Renderer2) {}
 
-  // ──────────────────────────────────────────────────────────────────────────────
-  // View bindings
-  // ──────────────────────────────────────────────────────────────────────────────
+  // ── Debug helpers ─────────────────────────────────────────────────────────────
+  private DEBUG_ZOOM = true; // flip to false to silence logs
+  private _dbgLast = 0;
+  private dbg(...args: any[]) {
+    if (!this.DEBUG_ZOOM) return;
+    const now = (performance && performance.now ? performance.now() : Date.now()) as number;
+    // throttle so we can read logs
+    if (now - this._dbgLast > 100) {
+      // eslint-disable-next-line no-console
+      console.log('[zoom]', ...args);
+      this._dbgLast = now;
+    }
+  }
+  private markActiveHudLayers() {
+    for (let i = 0; i < this.HUDS.length; i++) {
+      const el = this.HUDS[i].el;
+      if (i === this.animFromIdx) el.style.outline = '1px dashed rgba(255,150,60,0.9)';
+      else if (i === this.animToIdx) el.style.outline = '1px dashed rgba(80,200,255,0.9)';
+      else el.style.outline = '';
+    }
+  }
 
+  // ── View refs ─────────────────────────────────────────────────────────────────
   @ViewChild('starHost', { static: true }) starHost!: ElementRef<HTMLDivElement>;
   @ViewChild('starCanvas', { static: true }) starCanvas!: ElementRef<HTMLCanvasElement>;
   @ViewChild('centerline', { static: true }) centerline!: ElementRef<HTMLCanvasElement>;
   @ViewChild('timeline', { static: true }) timeline!: ElementRef<HTMLCanvasElement>;
 
-  // ──────────────────────────────────────────────────────────────────────────────
-  // Zoom tiers (HUD layers): Day → Millennium
-  // ──────────────────────────────────────────────────────────────────────────────
-
+  // ── Zoom tiers ────────────────────────────────────────────────────────────────
   zoomLevels: ZoomSpec[] = [
-    { id: 'guidesDay', name: 'Day', unit: 1 / 365 }, // Day (~; formatter handles leap)
+    { id: 'guidesDay', name: 'Day', unit: 1 / 365 },
     { id: 'guidesMonth', name: 'Month', unit: 1 / 12 },
     { id: 'guidesYear', name: 'Year', unit: 1 },
     { id: 'guidesDecade', name: 'Decade', unit: 10 },
@@ -49,72 +62,35 @@ export class App implements AfterViewInit, OnDestroy {
   zoomLabels: string[] = this.zoomLevels.map((z) => z.name);
   currentZoomIdx = 2; // Year
 
-  /**
-   * Per-zoom base star densities: larger scale → “closer” → less dense.
-   * These stack by level; tune to taste.
-   */
-  private readonly starBaseScaleByLevel = [
-    1.1, // Day      (closest, least dense)
-    1.06, // Month
-    1.0, // Year     (neutral)
-    0.96, // Decade
-    0.93, // Century
-    0.9, // Milennium (farthest, most dense)
-  ];
+  private readonly starBaseScaleByLevel = [1.1, 1.06, 1.0, 0.96, 0.93, 0.9];
 
-  // ──────────────────────────────────────────────────────────────────────────────
-  // Starfield state (render + parallax/zoom tween)
-  // ──────────────────────────────────────────────────────────────────────────────
-
-  // Effective “density” scale applied now (non-anim = base of current zoom level)
+  // ── Starfield / zoom state ───────────────────────────────────────────────────
   private starEffectiveScale = this.starBaseScaleByLevel[this.currentZoomIdx];
-
-  /**
-   * During zoom we freeze parallax phase (lockOffX/Y) so stars don’t drift.
-   */
   private starZoom = {
     active: false,
     from: this.starBaseScaleByLevel[this.currentZoomIdx],
     to: this.starBaseScaleByLevel[this.currentZoomIdx],
-    startSx: 0, // informational
-    startSy: 0, // informational
-    lockOffX: 0, // frozen parallax offset X during zoom
-    lockOffY: 0, // frozen parallax offset Y during zoom
+    lockOffX: 0,
+    lockOffY: 0,
   };
 
-  // Cross-fade bookkeeping between HUD tiers (fromIdx → toIdx)
   private animFromIdx = this.currentZoomIdx;
   private animToIdx = this.currentZoomIdx;
 
-  /**
-   * Canonical date under the grey centerline (year fraction). This is
-   * what we preserve across jumps/zoom; it can be null until first compute.
-   */
+  // Canonical center date
   private centerYF: number | null = null;
+  private pendingZoomIdx: number | null = null;
 
-  private pendingZoomIdx: number | null = null; // target from UI slider drag
-
-  // Persistent parallax base phase (to keep visual continuity outside zoom)
-  private starPhaseBaseX = 0; // CSS px modulo patternSize
-  private starPhaseBaseY = 0;
-
-  // “Depth pulse” amplitude during zoom (subtle)
-  private readonly STAR_ZOOM_MAX = 0.06;
-
-  // Effective parallax-driving scroll (decoupled from raw window scroll at edges)
+  // Parallax drivers
   private starParallaxScrollX = 0;
   private starParallaxScrollY = 0;
 
-  // Prevent re-entrant work when we programmatically jump the scrollbar
   private settingScroll = false;
-
-  // Last committed scrollY we consider “authoritative”
   private lastScrollY = 0;
 
-  // Keep some breathing room from the extremes when we hop sides
-  private readonly EDGE_PAD = 32; // CSS px (augmented by viewport proportion)
+  private readonly EDGE_PAD = 32;
 
-  // Runtime-created HUD canvases (one per zoom level)
+  // HUD canvas list
   private HUDS: Array<{
     el: HTMLCanvasElement;
     ctx: CanvasRenderingContext2D;
@@ -122,10 +98,7 @@ export class App implements AfterViewInit, OnDestroy {
     id: string;
   }> = [];
 
-  // ──────────────────────────────────────────────────────────────────────────────
-  // Timeline data
-  // ──────────────────────────────────────────────────────────────────────────────
-
+  // ── Data ──────────────────────────────────────────────────────────────────────
   private TIMELINE_POINTS: Record<string, string> = {
     'January 1, 150 B.C.E.': 'January 1, 150 B.C.E.',
     '0 C.E.': '0 C.E.',
@@ -143,35 +116,30 @@ export class App implements AfterViewInit, OnDestroy {
     '2050 C.E.': '2050 C.E.',
   };
 
-  // ──────────────────────────────────────────────────────────────────────────────
-  // Canvas / device sizing
-  // ──────────────────────────────────────────────────────────────────────────────
-
+  // ── Sizing ────────────────────────────────────────────────────────────────────
   private dpr = Math.max(1, window.devicePixelRatio || 1);
-
-  // Device/CSS sizes (kept in sync via applySize)
   private DPR = 1;
   private W = 0;
-  private H = 0; // device px for canvases
+  private H = 0;
   private CW = 0;
-  private CH = 0; // centerline canvas size
+  private CH = 0;
   private TW = 0;
-  private TH = 0; // timeline canvas size
+  private TH = 0;
 
-  // Grid/HUD config (CSS px values)
+  // Grid/HUD config — 6 visible lines target
   private GRID = {
-    spacingCSS: 0, // px between ticks at current TL.unitYears
-    targetVisible: 6, // ~visible tick count target
-    topGapCSS: 40, // top gutter
+    spacingCSS: 0,
+    targetVisible: 6, // <— requested tweak
+    topGapCSS: 40,
     color: 'rgba(255,150,60,0.55)',
     thicknessCSS: 2,
   };
 
-  // Timeline style and mapping parameters
+  // Timeline style
   private TL = {
-    baseYear: 0, // base origin (year fraction)
-    baselineOffsetIndex: 2, // baseline grid row offset
-    unitYears: 1, // years per grid step for current zoom
+    baseYear: 0,
+    baselineOffsetIndex: 2,
+    unitYears: 1,
     pointRcss: 10,
     pointGlow: 14,
     pointPast: 'rgba(255,230,160,0.98)',
@@ -183,94 +151,90 @@ export class App implements AfterViewInit, OnDestroy {
     lineDashCSS: [8, 6] as [number, number],
   };
 
-  // ──────────────────────────────────────────────────────────────────────────────
-  // Scroll anchoring & virtual window bounds
-  // ──────────────────────────────────────────────────────────────────────────────
-
-  private GRID_K0: number | null = null; // anchored grid row index
-  private SCROLL_SHIFT = 0; // legacy dataset-shift (0 in virtual mode)
+  // ── Virtual window & bounds ───────────────────────────────────────────────────
+  private GRID_K0: number | null = null;
+  private SCROLL_SHIFT = 0;
   private SCROLL_MIN: number | null = null;
   private SCROLL_MAX: number | null = null;
   private DID_AUTO_CENTER = false;
 
-  // Virtual window sizing (fixed height, independent from dataset)
-  private readonly VWIN_MULT = 17; // total scroll area = vh * VWIN_MULT
-  private readonly EDGE_EPS = 2; // px: near-edge tolerance
+  private readonly VWIN_MULT = 17;
+  private readonly EDGE_EPS = 2;
   private resizeDoneTimer: any = null;
   private readonly RESIZE_DEBOUNCE_MS = 250;
 
-  // ──────────────────────────────────────────────────────────────────────────────
-  // Raw listener refs (so we can remove them)
-  // ──────────────────────────────────────────────────────────────────────────────
-
+  // Raw listeners
   private wheelHandler?: (e: WheelEvent) => void;
   private tStartHandler?: (e: TouchEvent) => void;
   private tMoveHandler?: (e: TouchEvent) => void;
   private touchY0: number | null = null;
 
-  // ──────────────────────────────────────────────────────────────────────────────
-  // Zoom animation envelope
-  // ──────────────────────────────────────────────────────────────────────────────
+  // ── Zoom envelope (plus HUD step fields) ──────────────────────────────────────
+  private ZOOM_ANIM: {
+    active: boolean;
+    t0: number;
+    dur: number;
+    startUnit: number;
+    endUnit: number;
+    keepYear: number | null;
+    targetIdx: number;
 
-  private ZOOM_ANIM = {
+    // star tween endpoints (single smooth tween end-to-end)
+    starFromScale?: number;
+    starToScale?: number;
+
+    // HUD step pair
+    hudFromIdx?: number;
+    hudToIdx?: number;
+    hudStartUnit?: number;
+    hudEndUnit?: number;
+
+    startIdx?: number;
+    endIdx?: number;
+  } = {
     active: false,
     t0: 0,
-    dur: 2500, // ms
+    dur: 2500,
     startUnit: 1,
     endUnit: 1,
-    keepYear: null as number | null,
+    keepYear: null,
     targetIdx: this.currentZoomIdx,
   };
 
-  // ──────────────────────────────────────────────────────────────────────────────
-  // Derived getters / small helpers
-  // ──────────────────────────────────────────────────────────────────────────────
-
-  /** Always use the virtual-window model. */
-  private get useVirtualWindow(): boolean {
+  // ── Helpers ───────────────────────────────────────────────────────────────────
+  private get useVirtualWindow() {
     return true;
   }
 
-  /** Years per CSS px at current zoom (useful for conversions). */
   private yearsPerCssPx() {
-    // px per year = spacingCSS / unitYears → years per px = unitYears / spacingCSS
     return this.TL.unitYears / this.GRID.spacingCSS;
   }
 
-  // ──────────────────────────────────────────────────────────────────────────────
-  // Lifecycle
-  // ──────────────────────────────────────────────────────────────────────────────
-
   ngAfterViewInit(): void {
-    // Build HUD canvases (insert before centerline for correct z-order)
     this.buildHudLayers();
 
-    // Starfield renderer
     this.starRender.init(this.starCanvas.nativeElement, 512);
     this.starRender.setDevicePixelRatio(this.DPR);
 
-    // Initial sizing
     this.sizeAll();
 
-    // Initial zoom unit and base year
     this.TL.unitYears = this.zoomLevels[this.currentZoomIdx].unit;
     const entries = this.getEntries();
     if (entries.length) this.TL.baseYear = entries[0].yf;
 
-    // Establish grid, bounds, virtual room, and initial centering
     this.anchorGrid();
     this.updateScrollBounds();
     this.ensureScrollRoomFromBounds();
-    this.centerFirstPoint(); // virtual: centers data under centerline without moving scrollbar
+    this.centerFirstPoint();
     this.updateScrollBounds();
     this.ensureScrollRoomFromBounds();
     this.clampScroll();
 
-    // Track initial parallax driver
     this.starParallaxScrollX = window.scrollX || window.pageXOffset || 0;
     this.starParallaxScrollY = window.scrollY || window.pageYOffset || 0;
+    this.lastScrollY = this.starParallaxScrollY; // <— seed last “good” position
 
-    // Show active HUD tier (no CSS transition flashes)
+    // show active tier
     for (const h of this.HUDS) {
       h.el.classList.add('hud-hidden', 'no-anim');
       h.el.classList.remove('hud-visible');
@@ -285,14 +249,11 @@ export class App implements AfterViewInit, OnDestroy {
       setTimeout(() => this.HUDS.forEach((h) => h.el.classList.remove('no-anim')), 50);
     }, 30);
 
-    // Keyboard zoom
+    // keyboard + raw (trackpad) edge guards
     window.addEventListener('keydown', this.onKeyDown, { passive: false });
-
-    // Raw non-passive listeners (so we can block native scrolling at dataset edges)
     this.wheelHandler = this.onWheelRaw;
     this.tStartHandler = this.onTouchStartRaw;
     this.tMoveHandler = this.onTouchMoveRaw;
-
     window.addEventListener('wheel', this.wheelHandler, { passive: false });
     window.addEventListener('touchstart', this.tStartHandler, { passive: true });
     window.addEventListener('touchmove', this.tMoveHandler, { passive: false });
@@ -301,17 +262,12 @@ export class App implements AfterViewInit, OnDestroy {
   ngOnDestroy(): void {
     window.removeEventListener('keydown', this.onKeyDown as any);
     if (this.resizeDoneTimer) clearTimeout(this.resizeDoneTimer);
-
     if (this.wheelHandler) window.removeEventListener('wheel', this.wheelHandler as any);
     if (this.tStartHandler) window.removeEventListener('touchstart', this.tStartHandler as any);
     if (this.tMoveHandler) window.removeEventListener('touchmove', this.tMoveHandler as any);
   }
 
-  // ──────────────────────────────────────────────────────────────────────────────
-  // Input: keyboard / wheel / touch
-  // ──────────────────────────────────────────────────────────────────────────────
-
-  /** Prevent native scroll from moving the bar when pushing beyond dataset bounds. */
+  // ── Input / edge guards (blocks momentum on trackpad) ─────────────────────────
   private onWheelRaw = (e: WheelEvent) => {
     const pushingUp = e.deltaY < 0;
     const pushingDown = e.deltaY > 0;
@@ -319,43 +275,36 @@ export class App implements AfterViewInit, OnDestroy {
       e.preventDefault();
     }
   };
-
   private onTouchStartRaw = (e: TouchEvent) => {
     this.touchY0 = e.touches?.[0]?.clientY ?? null;
   };
-
   private onTouchMoveRaw = (e: TouchEvent) => {
     if (this.touchY0 == null) return;
     const y = e.touches?.[0]?.clientY ?? this.touchY0;
-    const dy = y - this.touchY0; // down = +, up = -
+    const dy = y - this.touchY0;
     const pushingUp = dy > 0;
     const pushingDown = dy < 0;
-
     if ((this.atDatasetStart() && pushingUp) || (this.atDatasetEnd() && pushingDown)) {
-      e.preventDefault(); // block momentum/scrollbar at edges
+      e.preventDefault();
     }
   };
 
-  /** Zoom slider: while dragging, only remember the target; don’t redraw. */
+  // ── Zoom Control handlers ─────────────────────────────────────────────────────
   onZoomInput(idx: number) {
     this.pendingZoomIdx = this.clampZoomIndex(idx);
   }
-
-  /** Zoom slider: on release, apply zoom to remembered target. */
   onZoomChange(idx: number) {
     const target = this.pendingZoomIdx ?? idx;
     this.pendingZoomIdx = null;
     this.setZoomIndex(target);
   }
 
-  /** Keyboard handler for left/right zooming. */
   private onKeyDown = (e: KeyboardEvent) => {
     const ae = document.activeElement as HTMLElement | null;
     const tn = ae?.tagName?.toUpperCase?.() ?? '';
     const typing =
       tn === 'INPUT' || tn === 'TEXTAREA' || tn === 'SELECT' || !!ae?.isContentEditable;
     if (typing) return;
-
     const key = e.key || e.code;
     if (key === 'ArrowRight') {
       e.preventDefault();
@@ -366,40 +315,26 @@ export class App implements AfterViewInit, OnDestroy {
     }
   };
 
-  // ──────────────────────────────────────────────────────────────────────────────
-  // Host listeners: resize / scroll
-  // ──────────────────────────────────────────────────────────────────────────────
-
-  /** Debounced resize: keep the date under centerline and re-fit canvases/bounds. */
+  // ── Host listeners ────────────────────────────────────────────────────────────
   @HostListener('window:resize')
   onResize() {
     const keepYear = this.yToYearDev(this.CH / 2);
     if (this.resizeDoneTimer) clearTimeout(this.resizeDoneTimer);
-
     this.resizeDoneTimer = setTimeout(() => {
-      // If a zoom is running, snap it to its end state.
       if (this.ZOOM_ANIM.active) {
         this.TL.unitYears = this.ZOOM_ANIM.endUnit;
         this.currentZoomIdx = this.ZOOM_ANIM.targetIdx;
         this.ZOOM_ANIM.active = false;
       }
-
-      // Recompute canvas sizes from the fixed viewport container
       this.applySize(this.viewportW(), this.viewportH());
-
-      // Preserve date under centerline
       this.reanchorGridForCenter(keepYear);
-
-      // Update bounds and virtual window
       this.updateScrollBounds();
       this.ensureScrollRoomFromBounds();
 
       if (this.useVirtualWindow) {
-        // Keep star phase visually continuous when we recenter the scrollbar
         const mid = ((this.SCROLL_MIN ?? 0) + (this.SCROLL_MAX ?? 0)) * 0.5;
         const sx = window.scrollX || window.pageXOffset || 0;
         this.starRender.rebasePhaseForProgrammaticScroll(sx, mid);
-
         window.scrollTo(0, mid);
         this.reanchorGridForCenter(keepYear);
         this.starParallaxScrollX = sx;
@@ -410,23 +345,19 @@ export class App implements AfterViewInit, OnDestroy {
         this.starParallaxScrollX = window.scrollX || window.pageXOffset || 0;
         this.starParallaxScrollY = y;
       }
-
       this.clampScroll();
       this.redraw();
     }, this.RESIZE_DEBOUNCE_MS);
   }
 
-  /**
-   * Scroll: update canonical center, parallax, and perform virtual-window flips
-   * when the scrollbar hits an end (unless hard-limited by dataset edges).
-   */
   @HostListener('window:scroll')
   onScroll() {
-    if (this.settingScroll) return; // ignore our own programmatic jumps
+    // Ignore our own programmatic jumps
+    if (this.settingScroll) return;
 
     const s = window.scrollY || window.pageYOffset || 0;
 
-    // Clamp to virtual-window bounds (prevents runaway bar on some platforms).
+    // Clamp to virtual-window bounds (safety)
     if (this.SCROLL_MIN != null && s < this.SCROLL_MIN - 1) {
       window.scrollTo(0, this.SCROLL_MIN);
       return;
@@ -435,13 +366,11 @@ export class App implements AfterViewInit, OnDestroy {
       return;
     }
 
-    // Compute center-year raw vs clamped to dataset; keep grid locked to clamped.
+    // Compute center-year raw vs clamped
     const kyRaw = this.yToYearDev(this.CH / 2);
     const kyClamped = this.clampCenterToData(kyRaw);
-    this.centerYF = kyClamped;
-    this.reanchorGridForCenter(kyClamped);
 
-    // Are we pushing past dataset bounds?
+    // Are we *pushing past* dataset edges? (i.e., raw trying to go beyond the clamp)
     const es = this.getEntries();
     const EPS = 1e-7;
     let pushingPastTop = false;
@@ -453,7 +382,36 @@ export class App implements AfterViewInit, OnDestroy {
       pushingPastBottom = kyClamped >= maxY - EPS && kyRaw > kyClamped + EPS;
     }
 
-    // Effective parallax scroll (freeze when hard-clamped or pushing past edges).
+    // If user is pushing past the dataset, snap to the nearest virtual edge
+    // and preserve star phase + center-year anchoring.
+    if (pushingPastTop || pushingPastBottom) {
+      const keep = kyClamped; // keep the edge date under the centerline
+      const target = pushingPastTop ? this.SCROLL_MIN ?? s : this.SCROLL_MAX ?? s;
+
+      // preserve on-screen star phase across this programmatic jump
+      const sx = window.scrollX || window.pageXOffset || 0;
+      this.starRender.rebasePhaseForProgrammaticScroll(sx, target);
+
+      // perform the snap-to-edge without re-entrancy
+      this.settingScroll = true;
+      window.scrollTo(0, target);
+      this.settingScroll = false;
+
+      // keep the same date under the centerline and freeze parallax at the edge
+      this.reanchorGridForCenter(keep);
+      this.starParallaxScrollX = sx;
+      this.starParallaxScrollY = target;
+      this.lastScrollY = target;
+
+      this.redraw();
+      return;
+    }
+
+    // Commit the clamped center and keep grid locked to it
+    this.centerYF = kyClamped;
+    this.reanchorGridForCenter(kyClamped);
+
+    // Effective parallax scroll (freeze when hard-clamped or at virtual edges)
     const rawSx = window.scrollX || window.pageXOffset || 0;
     const rawSy = s;
     let effSy = rawSy;
@@ -471,50 +429,43 @@ export class App implements AfterViewInit, OnDestroy {
       }
     }
 
-    // Commit parallax drivers, remember last good scroll
+    // Commit parallax drivers
     this.starParallaxScrollX = rawSx;
     this.starParallaxScrollY = effSy;
-    this.lastScrollY = s;
+
+    // Only update "last good" scroll when we are NOT pushing outward past an edge.
+    // (If pushing inward/back toward data, s will move toward lastScrollY and this is fine.)
+    if (!(pushingPastTop && s < this.lastScrollY) && !(pushingPastBottom && s > this.lastScrollY)) {
+      this.lastScrollY = s;
+    }
 
     // Draw everything
     this.redraw();
 
-    // Flip to the opposite side when hitting a virtual edge (unless at dataset end).
+    // Flip to opposite side of the virtual window when needed
     this.recenterVirtualWindowIfNeeded();
   }
 
-  // ──────────────────────────────────────────────────────────────────────────────
-  // HUD building & sizing
-  // ──────────────────────────────────────────────────────────────────────────────
-
-  /** Create HUD canvases (one per zoom level) and insert into DOM in z order. */
+  // ── HUD building / sizing ─────────────────────────────────────────────────────
   private buildHudLayers() {
     const before = this.centerline?.nativeElement as HTMLCanvasElement | null;
     const parent = (before?.parentNode ?? null) as (Node & ParentNode) | null;
 
     for (const spec of this.zoomLevels) {
       let el = document.getElementById(spec.id) as HTMLCanvasElement | null;
-
       if (!el) {
         el = this.r2.createElement('canvas') as HTMLCanvasElement;
         el.id = spec.id;
         this.r2.addClass(el, 'layer');
         this.r2.addClass(el, 'hud');
-
-        if (parent && before) {
-          parent.insertBefore(el, before); // insert alongside centerline
-        } else {
-          (before?.ownerDocument?.body ?? document.body).appendChild(el); // fallback
-        }
+        if (parent && before) parent.insertBefore(el, before);
+        else (before?.ownerDocument?.body ?? document.body).appendChild(el);
       }
-
       el.classList.add('hud-hidden', 'no-anim');
       const ctx = el.getContext('2d', { alpha: true }) as CanvasRenderingContext2D;
       this.HUDS.push({ el, ctx, unit: spec.unit, id: spec.id });
     }
   }
-
-  /** Get CSS viewport width from fixed host (or window fallback). */
   private viewportW() {
     const host = this.starHost?.nativeElement;
     if (host) return host.clientWidth || window.innerWidth;
@@ -522,8 +473,6 @@ export class App implements AfterViewInit, OnDestroy {
     if (vv?.width) return vv.width;
     return window.innerWidth;
   }
-
-  /** Get CSS viewport height from fixed host (or window fallback). */
   private viewportH() {
     const host = this.starHost?.nativeElement;
     if (host) return host.clientHeight || window.innerHeight;
@@ -531,29 +480,23 @@ export class App implements AfterViewInit, OnDestroy {
     if (vv?.height) return vv.height;
     return window.innerHeight;
   }
-
-  /** Convenience: size to current viewport. */
   private sizeAll() {
     this.applySize(this.viewportW(), this.viewportH());
   }
-
-  /** Apply sizes to all canvases; compute DPR-scaled device sizes and grid spacing. */
   private applySize(cssW: number, cssH: number) {
     this.DPR = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
     this.starRender.setDevicePixelRatio(this.DPR);
-    const Wn = Math.floor(cssW * this.DPR);
-    const Hn = Math.floor(cssH * this.DPR);
+    const Wn = Math.floor(cssW * this.DPR),
+      Hn = Math.floor(cssH * this.DPR);
     this.W = Wn;
     this.H = Hn;
 
-    // Starfield canvas
     const star = this.starCanvas.nativeElement;
     star.width = this.W;
     star.height = this.H;
     star.style.width = cssW + 'px';
     star.style.height = cssH + 'px';
 
-    // HUD canvases
     for (const h of this.HUDS) {
       h.el.width = this.W;
       h.el.height = this.H;
@@ -561,7 +504,6 @@ export class App implements AfterViewInit, OnDestroy {
       h.el.style.height = cssH + 'px';
     }
 
-    // Centerline & timeline canvases
     const ccv = this.centerline.nativeElement;
     const tcv = this.timeline.nativeElement;
     ccv.width = this.CW = this.W;
@@ -573,17 +515,11 @@ export class App implements AfterViewInit, OnDestroy {
     tcv.style.width = cssW + 'px';
     tcv.style.height = cssH + 'px';
 
-    // Grid spacing in CSS px (aim for ~targetVisible ticks)
     this.GRID.spacingCSS = Math.max(12, cssH / this.GRID.targetVisible);
-
-    // Starfield DPR used for pattern transform
     this.dpr = this.DPR;
   }
 
-  // ──────────────────────────────────────────────────────────────────────────────
-  // Dataset helpers
-  // ──────────────────────────────────────────────────────────────────────────────
-
+  // ── Data helpers / parsing ────────────────────────────────────────────────────
   private clamp(v: number, a: number, b: number) {
     return v < a ? a : v > b ? b : v;
   }
@@ -598,16 +534,13 @@ export class App implements AfterViewInit, OnDestroy {
     return yf >= 0 ? Math.floor(yf) : Math.ceil(yf);
   }
 
-  /** Parse a date string or number to a “year fraction” and whether it was year-only. */
   private yearParseWithFlag(input: string | number) {
     if (typeof input === 'number' && isFinite(input))
       return { yf: input, yearOnly: Math.floor(input) === input };
-
     if (typeof input !== 'string') return { yf: NaN, yearOnly: false };
 
     const raw = input.normalize ? input.normalize('NFKC').trim() : String(input).trim();
     const U = raw.toUpperCase();
-
     const months = [
       'JAN',
       'FEB',
@@ -640,14 +573,12 @@ export class App implements AfterViewInit, OnDestroy {
     return { yf, yearOnly };
   }
 
-  /** Convert input text/number to year fraction (B.C.E./C.E. supported). */
   private yearFractionFromInput(input: string | number): number {
     if (typeof input === 'number' && isFinite(input)) return input;
     if (typeof input !== 'string') return NaN;
 
     const raw = input.normalize ? input.normalize('NFKC').trim() : String(input).trim();
     const U = raw.toUpperCase();
-
     const hasBCE =
       U.includes('BCE') ||
       U.includes('B.C.E') ||
@@ -685,7 +616,6 @@ export class App implements AfterViewInit, OnDestroy {
       'DEC',
     ];
     const mdays = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-
     const parts = raw.split(',').join(' ').split(' ').filter(Boolean);
     let mi = -1;
     if (parts.length) {
@@ -713,7 +643,6 @@ export class App implements AfterViewInit, OnDestroy {
     return NaN;
   }
 
-  /** Return timeline entries sorted by year fraction. */
   private getEntries() {
     const out: { label: string; when: string; yf: number; yearOnly: boolean }[] = [];
     for (const key of Object.keys(this.TIMELINE_POINTS)) {
@@ -725,7 +654,6 @@ export class App implements AfterViewInit, OnDestroy {
     return out;
   }
 
-  /** Current UTC date as year fraction. */
   private nowYearFraction() {
     const d = new Date();
     const y = d.getUTCFullYear();
@@ -734,10 +662,7 @@ export class App implements AfterViewInit, OnDestroy {
     return y + (d.getTime() - a) / (b - a);
   }
 
-  // ──────────────────────────────────────────────────────────────────────────────
-  // Grid mapping (year ↔ y, anchoring, bounds)
-  // ──────────────────────────────────────────────────────────────────────────────
-
+  // ── Grid & mapping ────────────────────────────────────────────────────────────
   private gridKStart() {
     const sY = (window.scrollY || window.pageYOffset || 0) - this.SCROLL_SHIFT;
     return Math.ceil((sY - this.GRID.topGapCSS) / this.GRID.spacingCSS);
@@ -751,42 +676,32 @@ export class App implements AfterViewInit, OnDestroy {
   }
   private ppy() {
     return (this.GRID.spacingCSS * this.DPR) / this.TL.unitYears;
-  } // device px per year
-
-  /** Baseline Y in device px from anchored grid row. */
+  }
   private baselineYDev() {
     const sY = (window.scrollY || window.pageYOffset || 0) - this.SCROLL_SHIFT;
     return (this.GRID.topGapCSS + this.baselineGridK() * this.GRID.spacingCSS - sY) * this.DPR;
   }
-
   private yearToY(y: number) {
     return Math.round(this.baselineYDev() + (y - this.TL.baseYear) * this.ppy());
   }
   private yToYearDev(yDev: number) {
     return this.TL.baseYear + (yDev - this.baselineYDev()) / this.ppy();
   }
-
   private snapToUnit(yf: number, unit: number) {
     if (!unit) return yf;
     return yf >= 0 ? Math.floor(yf / unit) * unit : -Math.ceil(Math.abs(yf) / unit) * unit;
   }
-
-  /** Re-anchor grid so a specific year fraction sits under the visual centerline. */
   private reanchorGridForCenter(yf: number) {
     const sY = (window.scrollY || window.pageYOffset || 0) - this.SCROLL_SHIFT;
     const spacing = this.GRID.spacingCSS;
     if (!spacing || !isFinite(spacing)) return;
-
     const val =
       this.CH / (2 * this.DPR) -
       this.GRID.topGapCSS +
       sY -
       (yf - this.TL.baseYear) * (spacing / this.TL.unitYears);
-
     this.GRID_K0 = val / spacing - (this.TL.baselineOffsetIndex | 0);
   }
-
-  /** Scroll position (CSS px) required to place yf under the centerline. */
   private scrollForYear(yf: number) {
     return (
       this.GRID.topGapCSS +
@@ -795,9 +710,7 @@ export class App implements AfterViewInit, OnDestroy {
       this.CH / (2 * this.DPR)
     );
   }
-
-  /** Clamp the canonical center to dataset min/max. */
-  private clampCenterToData(yf: number): number {
+  private clampCenterToData(yf: number) {
     const es = this.getEntries();
     if (!es.length) return yf;
     const min = es[0].yf,
@@ -806,8 +719,6 @@ export class App implements AfterViewInit, OnDestroy {
     if (yf > max) return max;
     return yf;
   }
-
-  /** Compute virtual/dataset bounds; SCROLL_SHIFT is 0 for virtual mode. */
   private updateScrollBounds() {
     const es = this.getEntries();
     if (!es.length) {
@@ -831,8 +742,6 @@ export class App implements AfterViewInit, OnDestroy {
     if (this.SCROLL_MAX < this.SCROLL_MIN)
       [this.SCROLL_MIN, this.SCROLL_MAX] = [this.SCROLL_MAX, this.SCROLL_MIN];
   }
-
-  /** Clamp native window scroll to computed min/max. */
   private clampScroll() {
     if (this.SCROLL_MIN == null || this.SCROLL_MAX == null) return;
     const s = window.scrollY || window.pageYOffset || 0;
@@ -840,24 +749,17 @@ export class App implements AfterViewInit, OnDestroy {
     else if (s > this.SCROLL_MAX) window.scrollTo(0, this.SCROLL_MAX);
   }
 
-  // ──────────────────────────────────────────────────────────────────────────────
-  // Starfield & HUD drawing
-  // ──────────────────────────────────────────────────────────────────────────────
-
-  /** Top-level redraw: starfield, HUDs, centerline, timeline. */
+  // ── Redraw ────────────────────────────────────────────────────────────────────
   private redraw(fadeFrom = 1, fadeTo = 0) {
-    // Stars
     this.starRender.setParallaxScroll(this.starParallaxScrollX, this.starParallaxScrollY);
     this.starRender.setScale(this.starEffectiveScale);
     this.starRender.draw(this.viewportW(), this.viewportH());
 
-    // HUDs + overlays
     this.drawHuds(fadeFrom, fadeTo);
     this.drawCenterline();
     this.drawTimeline();
   }
 
-  /** Draw a single HUD layer (tick marks + labels) for a given unit size. */
   private drawHudLayer(ctx: CanvasRenderingContext2D, Wc: number, Hc: number, unitYears: number) {
     ctx.clearRect(0, 0, Wc, Hc);
 
@@ -877,53 +779,68 @@ export class App implements AfterViewInit, OnDestroy {
     const yTopYear = this.yToYearDev(0);
     const yBotYear = this.yToYearDev(Hc);
 
-    const isDayTier = Math.abs(u - 1 / 365) < 1e-7 || Math.abs(u - 1 / 366) < 1e-7;
+    // ── helpers ─────────────────────────────────────────────────────────────
+    // tolerant day-tier detector
+    const isDayTier = Math.abs(u - 1 / 365) < 1e-6 || Math.abs(u - 1 / 366) < 1e-6;
 
     const nextMonthOrYearAtOrAbove = (y: number, stepYears: number) =>
       y >= 0
         ? Math.ceil(y / stepYears) * stepYears
         : -Math.floor(Math.abs(y) / stepYears) * stepYears;
 
-    const nextDayBoundaryAtOrAbove = (y: number) => {
-      const y0 = this.startOfYearInt(y);
-      const diy = this.daysInYear(y0);
-      let frac = y - y0;
-      frac = this.clamp(frac, 0, 0.999999999);
-      const idx = Math.ceil(frac * diy);
-      return y0 + idx / diy;
-    };
+    const nextStepAtOrAbove = (y: number, step: number) =>
+      y >= 0 ? Math.ceil(y / step) * step : -Math.floor(Math.abs(y) / step) * step;
 
-    let yTick = isDayTier
-      ? nextDayBoundaryAtOrAbove(yTopYear - 1e-9)
-      : nextMonthOrYearAtOrAbove(yTopYear - 1e-9, u);
+    // ── ticks ───────────────────────────────────────────────────────────────
+    if (isDayTier) {
+      // Uniform placement every 1/365 year to avoid gaps/stalls.
+      // Labels still use per-year day units (1/daysInYear(year)) for leap-year correctness.
+      const step = 1 / 365;
 
-    // Ticks & labels
-    let safety = 0;
-    while (yTick <= yBotYear + 1e-7 && safety++ < 4000) {
-      const yPx = this.yearToY(yTick);
-      ctx.fillStyle = this.GRID.color;
-      ctx.fillRect(x0, Math.round(yPx - Math.floor(thick / 2)), segLen, thick);
+      let yTick = nextStepAtOrAbove(yTopYear - 1e-9, step);
 
-      let label = this.formatLabelByUnit(yTick, u);
-      if (isDayTier) {
-        const yForTick = yTick >= 0 ? Math.floor(yTick) : Math.ceil(yTick);
-        label = this.formatLabelByUnit(yTick, 1 / this.daysInYear(yForTick));
-      }
-      ctx.fillStyle = 'rgba(255,170,80,0.95)';
-      if (label) ctx.fillText(label, x0 - labelMargin, Math.round(yPx));
+      // Cap loop count based on visible span (prevents runaway loops).
+      const visibleYears = Math.max(0, yBotYear - yTopYear);
+      const maxTicks = Math.min(15000, Math.ceil(visibleYears / step) + 20);
 
-      if (isDayTier) {
-        const yYear = yTick >= 0 ? Math.floor(yTick) : Math.ceil(yTick);
-        const step = 1 / this.daysInYear(yYear);
+      let safety = 0;
+      while (yTick <= yBotYear + 1e-7 && safety++ < maxTicks) {
+        const yPx = this.yearToY(yTick);
+
+        // tick
+        ctx.fillStyle = this.GRID.color;
+        ctx.fillRect(x0, Math.round(yPx - Math.floor(thick / 2)), segLen, thick);
+
+        // label (use per-year unit for leap correctness)
+        const yr = yTick >= 0 ? Math.floor(yTick) : Math.ceil(yTick);
+        const diy = this.daysInYear(yr);
+        const label = this.formatLabelByUnit(yTick, 1 / diy);
+        if (label) {
+          ctx.fillStyle = 'rgba(255,170,80,0.95)';
+          ctx.fillText(label, x0 - labelMargin, Math.round(yPx));
+        }
+
         yTick += step;
-        const yYearNext = yTick >= 0 ? Math.floor(yTick) : Math.ceil(yTick);
-        if (yYearNext !== yYear) yTick = this.startOfYearInt(yTick);
-      } else {
+      }
+    } else {
+      // Original non-day path (Month/Year/Decade/Century/Millennium)
+      let yTick = nextMonthOrYearAtOrAbove(yTopYear - 1e-9, u);
+
+      let safety = 0;
+      while (yTick <= yBotYear + 1e-7 && safety++ < 4000) {
+        const yPx = this.yearToY(yTick);
+        ctx.fillStyle = this.GRID.color;
+        ctx.fillRect(x0, Math.round(yPx - Math.floor(thick / 2)), segLen, thick);
+
+        const label = this.formatLabelByUnit(yTick, u);
+        ctx.fillStyle = 'rgba(255,170,80,0.95)';
+        if (label) ctx.fillText(label, x0 - labelMargin, Math.round(yPx));
+
         yTick += u;
       }
     }
 
-    // Today marker
+    // ── Today marker (unchanged) ────────────────────────────────────────────
     const yToday = Math.round(this.yearToY(this.nowYearFraction()));
     if (yToday >= -4 && yToday <= Hc + 4) {
       const ySeg = yToday - Math.floor(thick / 2);
@@ -956,39 +873,45 @@ export class App implements AfterViewInit, OnDestroy {
     }
   }
 
-  /** Render active HUD(s): cross-fade during zoom; single layer otherwise. */
   private drawHuds(fadeFrom = 1, fadeTo = 0) {
     if (this.ZOOM_ANIM.active) {
       const from = this.HUDS[this.animFromIdx];
       const to = this.HUDS[this.animToIdx];
 
+      // debug what we’re about to apply
+      this.dbg('drawHuds(active)', {
+        fromIdx: this.animFromIdx,
+        toIdx: this.animToIdx,
+        startUnit: this.ZOOM_ANIM.startUnit,
+        endUnit: this.ZOOM_ANIM.endUnit,
+        fadeFrom: +fadeFrom.toFixed(2),
+        fadeTo: +fadeTo.toFixed(2),
+      });
+
       from.ctx.clearRect(0, 0, this.W, this.H);
       to.ctx.clearRect(0, 0, this.W, this.H);
 
+      // Draw using the *current* mapping (grid stretches/contracts; labels stay centered)
       this.drawHudLayer(from.ctx, this.W, this.H, this.ZOOM_ANIM.startUnit);
       this.drawHudLayer(to.ctx, this.W, this.H, this.ZOOM_ANIM.endUnit);
 
-      // Programmatic, linear cross-fade (no CSS transitions)
-      from.el.style.opacity = String(fadeFrom);
-      to.el.style.opacity = String(fadeTo);
+      // Programmatic opacities
+      from.el.style.opacity = String(fadeFrom); // 1 → 0
+      to.el.style.opacity = String(fadeTo); // 0 → 1
 
-      // Hide other tiers during the tween
-      for (let i = 0; i < this.HUDS.length; i++) {
-        if (i !== this.animFromIdx && i !== this.animToIdx) this.HUDS[i].el.style.opacity = '0';
-      }
-    } else {
-      // Single, current tier
-      for (let i = 0; i < this.HUDS.length; i++) {
-        const h = this.HUDS[i];
-        h.ctx.clearRect(0, 0, this.W, this.H);
-        h.el.style.opacity = i === this.currentZoomIdx ? '1' : '0';
-      }
-      const cur = this.HUDS[this.currentZoomIdx];
-      this.drawHudLayer(cur.ctx, this.W, this.H, this.zoomLevels[this.currentZoomIdx].unit);
+      return;
     }
+
+    // non-anim: single tier
+    for (let i = 0; i < this.HUDS.length; i++) {
+      const h = this.HUDS[i];
+      h.ctx.clearRect(0, 0, this.W, this.H);
+      h.el.style.opacity = i === this.currentZoomIdx ? '1' : '0';
+    }
+    const cur = this.HUDS[this.currentZoomIdx];
+    this.drawHudLayer(cur.ctx, this.W, this.H, this.zoomLevels[this.currentZoomIdx].unit);
   }
 
-  /** Format a tick label appropriate to the given unit size. */
   private formatLabelByUnit(yf: number, unit: number) {
     const isBCE = yf < 0;
     let abs = isBCE ? -yf : yf;
@@ -997,7 +920,6 @@ export class App implements AfterViewInit, OnDestroy {
     const calYear = yf >= 0 ? Math.floor(yf) : Math.ceil(yf);
     let diy = this.daysInYear(calYear);
 
-    // Day tier
     if (Math.abs(unit - 1 / diy) < 1e-7 || Math.abs(unit - 1 / 365) < 1e-7) {
       let dayOfYear = Math.round(frac * diy);
       if (dayOfYear === diy) {
@@ -1038,7 +960,6 @@ export class App implements AfterViewInit, OnDestroy {
       return `${months2[mi]} ${day}, ${yr3}${tail2}`;
     }
 
-    // Month tier
     if (Math.abs(unit - 1 / 12) < 1e-7) {
       let m = Math.round(frac * 12);
       if (m === 12) {
@@ -1065,7 +986,6 @@ export class App implements AfterViewInit, OnDestroy {
       return `${months[m]} ${yr2}${tail}`;
     }
 
-    // Year/Decade/Century/Millennium
     if (unit >= 1) {
       const yr = isBCE ? -Math.round(abs) : Math.round(abs);
       return yr < 0 ? `${-yr} B.C.E.` : `${yr} C.E.`;
@@ -1073,7 +993,6 @@ export class App implements AfterViewInit, OnDestroy {
     return '';
   }
 
-  /** Grey centerline with a snapped label near dataset edges. */
   private drawCenterline() {
     const ccv = this.centerline.nativeElement;
     const clx = ccv.getContext('2d')!;
@@ -1116,31 +1035,24 @@ export class App implements AfterViewInit, OnDestroy {
     clx.restore();
   }
 
-  /** After first load, put the first data point under the centerline. */
   private centerFirstPoint() {
     if (this.DID_AUTO_CENTER) return;
     const es = this.getEntries();
     if (!es.length) return;
-
     const target = es[0].yf;
 
     if (this.useVirtualWindow) {
-      // Virtual window first-load: center data under the line without moving the scrollbar.
       this.centerYF = target;
       this.reanchorGridForCenter(target);
       this.updateScrollBounds();
       this.ensureScrollRoomFromBounds();
-      // leave scrollY as-is (e.g., 0 keeps the handle at the top)
     } else {
-      // Legacy non-virtual behavior
       const sTarget = this.scrollForYear(target);
       window.scrollTo(0, sTarget + this.SCROLL_SHIFT);
     }
-
     this.DID_AUTO_CENTER = true;
   }
 
-  /** Timeline segments and labels/points along vertical axis. */
   private drawTimeline() {
     const tcv = this.timeline.nativeElement;
     const ttx = tcv.getContext('2d')!;
@@ -1202,7 +1114,6 @@ export class App implements AfterViewInit, OnDestroy {
     for (const p of pts) {
       const isFuture = p.yf > nowYF;
       const color = isFuture ? this.TL.pointFuture : this.TL.pointPast;
-
       ttx.save();
       ttx.shadowBlur = pGlow;
       ttx.shadowColor = color;
@@ -1222,11 +1133,7 @@ export class App implements AfterViewInit, OnDestroy {
     }
   }
 
-  // ──────────────────────────────────────────────────────────────────────────────
-  // Virtual window paging (flip behavior) & helpers
-  // ──────────────────────────────────────────────────────────────────────────────
-
-  /** Are we at dataset min/max given current canonical center? */
+  // ── Virtual window flipping ───────────────────────────────────────────────────
   private atDatasetStart(): boolean {
     const es = this.getEntries();
     if (!es.length) return true;
@@ -1240,33 +1147,22 @@ export class App implements AfterViewInit, OnDestroy {
     return cy >= es[es.length - 1].yf;
   }
 
-  /**
-   * Flip the scrollbar handle to the opposite side of the virtual window,
-   * preserving the center date and star phase.
-   */
   private jumpVirtualWindow(keepYear: number, towards: 'top' | 'bottom') {
     const min = this.SCROLL_MIN ?? 0;
     const max = this.SCROLL_MAX ?? 0;
-
-    // Dynamic padding so we don’t immediately retrigger at the edge
     const vv = (window as any).visualViewport;
     const vh = vv?.height || window.innerHeight || this.H / this.DPR;
-    const pad = Math.max(this.EDGE_PAD, Math.round(vh * 0.02)); // 2% or 32px
-
+    const pad = Math.max(this.EDGE_PAD, Math.round(vh * 0.02));
     const target = towards === 'top' ? min + pad : max - pad;
     const sxNew = window.scrollX || window.pageXOffset || 0;
 
-    // Keep on-screen star phase identical after the jump
     this.starRender.rebasePhaseForProgrammaticScroll(sxNew, target);
 
     this.settingScroll = true;
     window.scrollTo(0, target);
     this.settingScroll = false;
 
-    // Re-anchor so the same date remains under the centerline
     this.reanchorGridForCenter(keepYear);
-
-    // Sync parallax trackers & last known scroll
     this.starParallaxScrollX = sxNew;
     this.starParallaxScrollY = target;
     this.lastScrollY = target;
@@ -1275,7 +1171,6 @@ export class App implements AfterViewInit, OnDestroy {
     this.redraw();
   }
 
-  /** Midpoint recentre (kept for resize/zoom normalization where useful). */
   private recenterToVirtualMid(keepYear: number, mid?: number) {
     const m = mid ?? ((this.SCROLL_MIN ?? 0) + (this.SCROLL_MAX ?? 0)) * 0.5;
     const sxNew = window.scrollX || window.pageXOffset || 0;
@@ -1295,14 +1190,8 @@ export class App implements AfterViewInit, OnDestroy {
     this.redraw();
   }
 
-  /**
-   * Called after each draw: if the native scrollbar hits the virtual edges,
-   * flip it to the opposite side (unless we’re parked at the dataset edges where
-   * we intentionally freeze everything).
-   */
   private recenterVirtualWindowIfNeeded() {
     if (!this.useVirtualWindow || this.ZOOM_ANIM.active) return;
-
     const s = window.scrollY || window.pageYOffset || 0;
     const min = this.SCROLL_MIN ?? 0;
     const max = this.SCROLL_MAX ?? 0;
@@ -1310,77 +1199,61 @@ export class App implements AfterViewInit, OnDestroy {
     const nearTop = s <= min + this.EDGE_EPS;
     const nearBot = s >= max - this.EDGE_EPS;
 
-    // If we’re at dataset edges, don’t flip (we want a frozen feel)
     if ((nearTop && this.atDatasetStart()) || (nearBot && this.atDatasetEnd())) return;
-
-    // Keep the same date under the centerline across the jump
     const keep = this.centerYF ?? this.yToYearDev(this.CH / 2);
-
     if (nearTop) this.jumpVirtualWindow(keep, 'bottom');
     else if (nearBot) this.jumpVirtualWindow(keep, 'top');
   }
 
-  /** Ensure the page has enough height for our fixed virtual window. */
   private ensureScrollRoomFromBounds() {
     const demo = document.querySelector('.demo') as HTMLElement | null;
     if (!demo) return;
-
     const vv = (window as any).visualViewport;
     const vh = vv?.height || window.innerHeight || this.H / this.DPR;
 
     if (this.useVirtualWindow) {
       const vwinPx = Math.max(this.VWIN_MULT * vh, vh);
       demo.style.minHeight = `${vwinPx}px`;
-
       this.SCROLL_MIN = 0;
       this.SCROLL_MAX = Math.max(0, vwinPx - vh);
-      this.SCROLL_SHIFT = 0; // no dataset shift in virtual mode
+      this.SCROLL_SHIFT = 0;
     } else {
-      // Legacy dataset-based sizing
       const needed = Math.ceil((this.SCROLL_MAX ?? 0) - (this.SCROLL_MIN ?? 0) + vh);
       demo.style.minHeight = Math.max(needed, vh) + 'px';
     }
   }
 
-  // ──────────────────────────────────────────────────────────────────────────────
-  // Zoom tween & cross-fade
-  // ──────────────────────────────────────────────────────────────────────────────
-
+  // ── Zoom logic (stepwise HUD pairs, single smooth star/timeline) ──────────────
   private clampZoomIndex(idx: number) {
     if (idx < 0) idx = 0;
     else if (idx >= this.zoomLevels.length) idx = this.zoomLevels.length - 1;
     return idx;
   }
 
-  /**
-   * Begin a zoom tween from current tier to idx, preserving center date and
-   * freezing star parallax phase during the cross-fade.
-   */
   private setZoomIndex(idx: number) {
     idx = this.clampZoomIndex(idx);
     if (idx === this.currentZoomIdx) return;
 
-    // If a tween is already running, snap to its end first.
     if (this.ZOOM_ANIM.active) {
       this.TL.unitYears = this.ZOOM_ANIM.endUnit;
       this.currentZoomIdx = this.ZOOM_ANIM.targetIdx;
       this.ZOOM_ANIM.active = false;
     }
 
-    // Preserve the date under the centerline (clamped to dataset).
     const keepYear = this.centerYF ?? this.yToYearDev(this.CH / 2);
     this.centerYF = this.clampCenterToData(keepYear);
 
-    const startUnit = this.zoomLevels[this.currentZoomIdx].unit;
-    const endUnit = this.zoomLevels[idx].unit;
+    const startIdx = this.currentZoomIdx;
+    const endIdx = idx;
+    const startUnit = this.zoomLevels[startIdx].unit;
+    const endUnit = this.zoomLevels[endIdx].unit;
 
-    this.animFromIdx = this.currentZoomIdx;
-    this.animToIdx = idx;
+    this.dbg('START', { startIdx, endIdx, startUnit, endUnit });
 
-    // Freeze star parallax phase and get density endpoints from the renderer.
+    // freeze star phase once, get density endpoints
     const lock = this.starRender.freezePhaseForZoom(
-      this.starBaseScaleByLevel[this.currentZoomIdx],
-      this.starBaseScaleByLevel[idx]
+      this.starBaseScaleByLevel[startIdx],
+      this.starBaseScaleByLevel[endIdx]
     );
     this.starZoom.active = true;
     this.starZoom.from = lock.fromScale;
@@ -1389,15 +1262,20 @@ export class App implements AfterViewInit, OnDestroy {
     this.starZoom.lockOffY = lock.lockOffY;
     this.starEffectiveScale = this.starZoom.from;
 
-    // Prepare HUD cross-fade by removing CSS transitions and driving inline opacity.
+    // Seed first boundary pair
+    const fromIdxSeed = startIdx;
+    const toIdxSeed = startIdx + (endIdx > startIdx ? 1 : -1);
+
+    // Prepare HUD layers: disable CSS transitions & set initial opacities for the two layers only
     for (let i = 0; i < this.HUDS.length; i++) {
       const el = this.HUDS[i].el;
       el.classList.add('no-anim');
       el.classList.remove('hud-visible', 'hud-hidden');
-      el.style.opacity = i === this.animFromIdx ? '1' : '0';
+      // only define explicit opacity for active pair; others leave as-is
+      if (i === fromIdxSeed) el.style.opacity = '1';
+      else if (i === toIdxSeed) el.style.opacity = '0';
     }
 
-    // Start the zoom animation envelope.
     this.ZOOM_ANIM = {
       active: true,
       t0: performance && performance.now ? performance.now() : Date.now(),
@@ -1405,22 +1283,43 @@ export class App implements AfterViewInit, OnDestroy {
       startUnit,
       endUnit,
       keepYear,
-      targetIdx: idx,
+      targetIdx: endIdx,
+
+      starFromScale: this.starZoom.from,
+      starToScale: this.starZoom.to,
+
+      hudFromIdx: fromIdxSeed,
+      hudToIdx: toIdxSeed,
+      hudStartUnit: this.zoomLevels[fromIdxSeed]?.unit ?? startUnit,
+      hudEndUnit: this.zoomLevels[toIdxSeed]?.unit ?? endUnit,
+
+      startIdx,
+      endIdx,
     };
 
-    // Draw exact first frame (from=1, to=0) before rAF.
+    this.animFromIdx = fromIdxSeed;
+    this.animToIdx = toIdxSeed;
+    this.dbg('seed pair', {
+      hudFromIdx: this.ZOOM_ANIM.hudFromIdx,
+      hudToIdx: this.ZOOM_ANIM.hudToIdx,
+      hudStartUnit: this.ZOOM_ANIM.hudStartUnit,
+      hudEndUnit: this.ZOOM_ANIM.hudEndUnit,
+    });
+    this.markActiveHudLayers();
+
+    // first exact frame
+    this.TL.unitYears = startUnit;
     this.redraw(1, 0);
     requestAnimationFrame(this.zoomTick);
   }
 
-  private easeInOutCubic(t: number) {
-    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-  }
+  private easeOutCubic(t: number) {
+    return 1 - Math.pow(1 - t, 3);
+  } // slows to stop
   private lerp(a: number, b: number, t: number) {
     return a + (b - a) * t;
   }
 
-  /** Per-frame zoom tween work: mapping, parallax, cross-fade, and cleanup. */
   private zoomTick = () => {
     if (!this.ZOOM_ANIM.active) return;
 
@@ -1429,39 +1328,83 @@ export class App implements AfterViewInit, OnDestroy {
     if (t < 0) t = 0;
     if (t > 1) t = 1;
 
-    const moveP = this.easeInOutCubic(t);
-    const fadeFrom = 1 - t,
-      fadeTo = t;
+    const moveP = this.easeOutCubic(t); // smooth, slows at end
+    const starP = moveP; // single smooth star tween across whole jump
 
-    // Interpolate HUD/timeline scale
-    this.TL.unitYears = this.lerp(this.ZOOM_ANIM.startUnit, this.ZOOM_ANIM.endUnit, moveP);
+    // Single smooth timeline scale
+    const unit = this.lerp(this.ZOOM_ANIM.startUnit, this.ZOOM_ANIM.endUnit, moveP);
+    this.TL.unitYears = unit;
 
-    // Keep the same date under the centerline
     const ky = this.ZOOM_ANIM.keepYear!;
     this.centerYF = this.clampCenterToData(ky);
     this.reanchorGridForCenter(ky);
     this.updateScrollBounds();
     this.ensureScrollRoomFromBounds();
 
-    // Classic mode would scroll each frame; virtual mode defers to end
-    if (!this.useVirtualWindow) {
-      const yTarget = this.scrollForYear(ky) + this.SCROLL_SHIFT;
-      window.scrollTo(0, yTarget);
-      this.clampScroll();
-    }
+    // Star density tween (phase is frozen)
+    this.starEffectiveScale = this.lerp(
+      this.ZOOM_ANIM.starFromScale!,
+      this.ZOOM_ANIM.starToScale!,
+      starP
+    );
 
-    // Star density tween (phase frozen via starZoom.lockOff*)
-    this.starEffectiveScale = this.lerp(this.starZoom.from, this.starZoom.to, moveP);
+    // HUD step: compute local fade progress between current pair
+    let localFade = 0;
+    const inc = this.ZOOM_ANIM.endIdx! > this.ZOOM_ANIM.startIdx!;
+    const a = this.ZOOM_ANIM.hudStartUnit!,
+      b = this.ZOOM_ANIM.hudEndUnit!;
+    if (inc) localFade = this.clamp((unit - a) / (b - a), 0, 1);
+    else localFade = this.clamp((a - unit) / (a - b), 0, 1);
 
-    // Draw two tiers with cross-fade + stars
+    const fadeFrom = 1 - localFade;
+    const fadeTo = localFade;
+
+    this.dbg('frame', {
+      t: +t.toFixed(3),
+      moveP: +moveP.toFixed(3),
+      unit: +unit.toFixed(6),
+      hudFromIdx: this.animFromIdx,
+      hudToIdx: this.animToIdx,
+      fadeFrom: +fadeFrom.toFixed(2),
+      fadeTo: +fadeTo.toFixed(2),
+    });
+
+    // Draw frame (stars + cross-fading HUDs + overlays)
     this.redraw(fadeFrom, fadeTo);
+
+    // Step to next pair if we finished this boundary and not yet at target
+    const finishedPair = localFade >= 0.999 && this.ZOOM_ANIM.hudToIdx !== this.ZOOM_ANIM.endIdx;
+    if (finishedPair) {
+      const nextFrom = this.ZOOM_ANIM.hudToIdx!;
+      const nextTo = nextFrom + (inc ? 1 : -1);
+
+      this.ZOOM_ANIM.hudFromIdx = nextFrom;
+      this.ZOOM_ANIM.hudToIdx = nextTo;
+      this.ZOOM_ANIM.hudStartUnit = this.zoomLevels[nextFrom].unit;
+      this.ZOOM_ANIM.hudEndUnit = this.zoomLevels[nextTo].unit;
+
+      this.animFromIdx = nextFrom;
+      this.animToIdx = nextTo;
+
+      // lock the new from layer fully visible, new to fully hidden before next fade
+      this.HUDS[this.animFromIdx].el.style.opacity = '1';
+      this.HUDS[this.animToIdx].el.style.opacity = '0';
+
+      this.dbg('STEP BOUNDARY → new pair', {
+        hudFromIdx: this.animFromIdx,
+        hudToIdx: this.animToIdx,
+        hudStartUnit: this.ZOOM_ANIM.hudStartUnit,
+        hudEndUnit: this.ZOOM_ANIM.hudEndUnit,
+      });
+      this.markActiveHudLayers();
+    }
 
     if (t < 1) {
       requestAnimationFrame(this.zoomTick);
       return;
     }
 
-    // ── Finish ──
+    // Finish
     this.TL.unitYears = this.ZOOM_ANIM.endUnit;
     this.currentZoomIdx = this.ZOOM_ANIM.targetIdx;
     this.ZOOM_ANIM.active = false;
@@ -1471,7 +1414,6 @@ export class App implements AfterViewInit, OnDestroy {
     this.ensureScrollRoomFromBounds();
 
     if (this.useVirtualWindow) {
-      // Normalize scrollbar while the phase is still frozen for perfect match
       this.recenterToVirtualMid(ky);
     } else {
       const yTarget = this.scrollForYear(ky) + this.SCROLL_SHIFT;
@@ -1481,17 +1423,15 @@ export class App implements AfterViewInit, OnDestroy {
       this.starParallaxScrollY = yTarget;
     }
 
-    // End tween: lock to target level density and reconcile persistent phase
     this.starZoom.active = false;
     this.starEffectiveScale = this.starBaseScaleByLevel[this.currentZoomIdx];
-
-    // Let the renderer compute the persistent base so stars don't jump
+    // reconcile persistent star phase based on locked offsets
     this.starRender.endZoomFreezeAndMatchPhase();
 
-    // Final single-tier draw
+    // final draw
     this.redraw();
 
-    // Restore class-driven opacity and visibility states
+    // Restore CSS-driven visibility
     for (let i = 0; i < this.HUDS.length; i++) {
       const el = this.HUDS[i].el;
       el.classList.remove('no-anim');
@@ -1499,5 +1439,7 @@ export class App implements AfterViewInit, OnDestroy {
       if (i === this.currentZoomIdx) el.classList.add('hud-visible');
       else el.classList.add('hud-hidden');
     }
+
+    this.dbg('FINISH', { currentZoomIdx: this.currentZoomIdx, finalUnit: this.TL.unitYears });
   };
 }
