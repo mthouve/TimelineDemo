@@ -12,6 +12,36 @@ import { ZoomControlComponent } from './zoom-control/zoom-control.component';
 
 type ZoomSpec = { id: string; name: string; unit: number };
 
+// Animation envelope (typed)
+type ZoomAnim = {
+  active: boolean;
+  t0: number;
+  dur: number;
+  startUnit: number;
+  endUnit: number;
+  keepYear: number | null;
+  targetIdx: number;
+
+  // star tween endpoints
+  starFromScale?: number;
+  starToScale?: number;
+
+  // HUD step pair
+  hudFromIdx?: number;
+  hudToIdx?: number;
+  hudStartUnit?: number;
+  hudEndUnit?: number;
+
+  startIdx?: number;
+  endIdx?: number;
+
+  // piecewise path
+  unitsSeq?: number[];
+  stepDist?: number[];
+  cumDist?: number[];
+  totalDist?: number;
+};
+
 @Component({
   selector: 'app-root',
   standalone: true,
@@ -22,19 +52,19 @@ type ZoomSpec = { id: string; name: string; unit: number };
 export class App implements AfterViewInit, OnDestroy {
   constructor(private starRender: StarfieldRendererService, private r2: Renderer2) {}
 
-  // ── Debug helpers ─────────────────────────────────────────────────────────────
-  private DEBUG_ZOOM = true; // flip to false to silence logs
+  // ── Debug ─────────────────────────────────────────────────────────────────────
+  private DEBUG_ZOOM = true;
   private _dbgLast = 0;
   private dbg(...args: any[]) {
     if (!this.DEBUG_ZOOM) return;
     const now = (performance && performance.now ? performance.now() : Date.now()) as number;
-    // throttle so we can read logs
     if (now - this._dbgLast > 100) {
       // eslint-disable-next-line no-console
       console.log('[zoom]', ...args);
       this._dbgLast = now;
     }
   }
+
   private markActiveHudLayers() {
     for (let i = 0; i < this.HUDS.length; i++) {
       const el = this.HUDS[i].el;
@@ -49,10 +79,13 @@ export class App implements AfterViewInit, OnDestroy {
   @ViewChild('starCanvas', { static: true }) starCanvas!: ElementRef<HTMLCanvasElement>;
   @ViewChild('centerline', { static: true }) centerline!: ElementRef<HTMLCanvasElement>;
   @ViewChild('timeline', { static: true }) timeline!: ElementRef<HTMLCanvasElement>;
+  @ViewChild(ZoomControlComponent) zoomUi?: ZoomControlComponent;
 
   // ── Zoom tiers ────────────────────────────────────────────────────────────────
+  private readonly MEAN_YEAR = 365.2425; // Gregorian mean
   zoomLevels: ZoomSpec[] = [
-    { id: 'guidesDay', name: 'Day', unit: 1 / 365 },
+    { id: 'guidesDay', name: 'Day', unit: 1 / this.MEAN_YEAR },
+    { id: 'guidesWeek', name: 'Week', unit: 7 / this.MEAN_YEAR },
     { id: 'guidesMonth', name: 'Month', unit: 1 / 12 },
     { id: 'guidesYear', name: 'Year', unit: 1 },
     { id: 'guidesDecade', name: 'Decade', unit: 10 },
@@ -60,9 +93,10 @@ export class App implements AfterViewInit, OnDestroy {
     { id: 'guidesMilennium', name: 'Milennium', unit: 1000 },
   ];
   zoomLabels: string[] = this.zoomLevels.map((z) => z.name);
-  currentZoomIdx = 2; // Year
+  currentZoomIdx = 3; // Year
 
-  private readonly starBaseScaleByLevel = [1.1, 1.06, 1.0, 0.96, 0.93, 0.9];
+  // Match #levels length
+  private readonly starBaseScaleByLevel = [1.12, 1.08, 1.05, 1.0, 0.96, 0.93, 0.9];
 
   // ── Starfield / zoom state ───────────────────────────────────────────────────
   private starEffectiveScale = this.starBaseScaleByLevel[this.currentZoomIdx];
@@ -77,7 +111,6 @@ export class App implements AfterViewInit, OnDestroy {
   private animFromIdx = this.currentZoomIdx;
   private animToIdx = this.currentZoomIdx;
 
-  // Canonical center date
   private centerYF: number | null = null;
   private pendingZoomIdx: number | null = null;
 
@@ -89,8 +122,7 @@ export class App implements AfterViewInit, OnDestroy {
   private lastScrollY = 0;
 
   private readonly EDGE_PAD = 32;
-
-  private readonly ONE_LEVEL_MS = 2500; // same feel as your single-level zoom
+  private readonly ONE_LEVEL_MS = 2500;
 
   // HUD canvas list
   private HUDS: Array<{
@@ -128,16 +160,14 @@ export class App implements AfterViewInit, OnDestroy {
   private TW = 0;
   private TH = 0;
 
-  // Grid/HUD config — 6 visible lines target
   private GRID = {
     spacingCSS: 0,
-    targetVisible: 6, // <— requested tweak
+    targetVisible: 6,
     topGapCSS: 40,
     color: 'rgba(255,150,60,0.55)',
     thicknessCSS: 2,
   };
 
-  // Timeline style
   private TL = {
     baseYear: 0,
     baselineOffsetIndex: 2,
@@ -171,29 +201,8 @@ export class App implements AfterViewInit, OnDestroy {
   private tMoveHandler?: (e: TouchEvent) => void;
   private touchY0: number | null = null;
 
-  // ── Zoom envelope (plus HUD step fields) ──────────────────────────────────────
-  private ZOOM_ANIM: {
-    active: boolean;
-    t0: number;
-    dur: number;
-    startUnit: number;
-    endUnit: number;
-    keepYear: number | null;
-    targetIdx: number;
-
-    // star tween endpoints (single smooth tween end-to-end)
-    starFromScale?: number;
-    starToScale?: number;
-
-    // HUD step pair
-    hudFromIdx?: number;
-    hudToIdx?: number;
-    hudStartUnit?: number;
-    hudEndUnit?: number;
-
-    startIdx?: number;
-    endIdx?: number;
-  } = {
+  // ── Animation envelope (typed + private backing) ──────────────────────────────
+  private _ZOOM_ANIM: ZoomAnim = {
     active: false,
     t0: 0,
     dur: 2500,
@@ -202,16 +211,30 @@ export class App implements AfterViewInit, OnDestroy {
     keepYear: null,
     targetIdx: this.currentZoomIdx,
   };
-
-  // ── Helpers ───────────────────────────────────────────────────────────────────
-  private get useVirtualWindow() {
-    return true;
+  get ZOOM_ANIM(): ZoomAnim {
+    return this._ZOOM_ANIM;
+  }
+  get isZoomAnimating(): boolean {
+    return this._ZOOM_ANIM.active;
   }
 
-  private yearsPerCssPx() {
-    return this.TL.unitYears / this.GRID.spacingCSS;
+  // ── Interaction locks & UI progress (getters for template) ───────────────────
+  private _scrollLocked = false;
+  get scrollLocked(): boolean {
+    return this._scrollLocked;
   }
 
+  private _zoomVisualIndex = this.currentZoomIdx; // fractional allowed
+  get zoomVisualIndex(): number {
+    return this._zoomVisualIndex;
+  }
+
+  private _zoomStepLabel = '';
+  get zoomStepLabel(): string {
+    return this._zoomStepLabel;
+  }
+
+  // ── Lifecycle ─────────────────────────────────────────────────────────────────
   ngAfterViewInit(): void {
     this.buildHudLayers();
 
@@ -234,7 +257,7 @@ export class App implements AfterViewInit, OnDestroy {
 
     this.starParallaxScrollX = window.scrollX || window.pageXOffset || 0;
     this.starParallaxScrollY = window.scrollY || window.pageYOffset || 0;
-    this.lastScrollY = this.starParallaxScrollY; // <— seed last “good” position
+    this.lastScrollY = this.starParallaxScrollY;
 
     // show active tier
     for (const h of this.HUDS) {
@@ -269,8 +292,12 @@ export class App implements AfterViewInit, OnDestroy {
     if (this.tMoveHandler) window.removeEventListener('touchmove', this.tMoveHandler as any);
   }
 
-  // ── Input / edge guards (blocks momentum on trackpad) ─────────────────────────
+  // ── Input / edge guards ───────────────────────────────────────────────────────
   private onWheelRaw = (e: WheelEvent) => {
+    if (this._scrollLocked || this._ZOOM_ANIM.active) {
+      e.preventDefault();
+      return;
+    }
     const pushingUp = e.deltaY < 0;
     const pushingDown = e.deltaY > 0;
     if ((this.atDatasetStart() && pushingUp) || (this.atDatasetEnd() && pushingDown)) {
@@ -281,6 +308,10 @@ export class App implements AfterViewInit, OnDestroy {
     this.touchY0 = e.touches?.[0]?.clientY ?? null;
   };
   private onTouchMoveRaw = (e: TouchEvent) => {
+    if (this._scrollLocked || this._ZOOM_ANIM.active) {
+      e.preventDefault();
+      return;
+    }
     if (this.touchY0 == null) return;
     const y = e.touches?.[0]?.clientY ?? this.touchY0;
     const dy = y - this.touchY0;
@@ -291,7 +322,7 @@ export class App implements AfterViewInit, OnDestroy {
     }
   };
 
-  // ── Zoom Control handlers ─────────────────────────────────────────────────────
+  // ── Zoom Control handlers (wired from template) ───────────────────────────────
   onZoomInput(idx: number) {
     this.pendingZoomIdx = this.clampZoomIndex(idx);
   }
@@ -317,16 +348,30 @@ export class App implements AfterViewInit, OnDestroy {
     }
   };
 
+  // For driving the thumb visually during animation (no component API required)
+  private getZoomSliderEl(): HTMLInputElement | null {
+    return document.querySelector(
+      'app-zoom-control input[type="range"]'
+    ) as HTMLInputElement | null;
+  }
+  private setSliderVisualIndex(idx: number) {
+    const el = this.getZoomSliderEl();
+    if (!el) return;
+    el.value = String(idx);
+    el.setAttribute('aria-valuenow', el.value);
+    (el as any).style?.setProperty?.('--zoom-visual-index', String(idx));
+  }
+
   // ── Host listeners ────────────────────────────────────────────────────────────
   @HostListener('window:resize')
   onResize() {
     const keepYear = this.yToYearDev(this.CH / 2);
     if (this.resizeDoneTimer) clearTimeout(this.resizeDoneTimer);
     this.resizeDoneTimer = setTimeout(() => {
-      if (this.ZOOM_ANIM.active) {
-        this.TL.unitYears = this.ZOOM_ANIM.endUnit;
-        this.currentZoomIdx = this.ZOOM_ANIM.targetIdx;
-        this.ZOOM_ANIM.active = false;
+      if (this._ZOOM_ANIM.active) {
+        this.TL.unitYears = this._ZOOM_ANIM.endUnit;
+        this.currentZoomIdx = this._ZOOM_ANIM.targetIdx;
+        this._ZOOM_ANIM.active = false;
       }
       this.applySize(this.viewportW(), this.viewportH());
       this.reanchorGridForCenter(keepYear);
@@ -354,12 +399,16 @@ export class App implements AfterViewInit, OnDestroy {
 
   @HostListener('window:scroll')
   onScroll() {
-    // Ignore our own programmatic jumps
+    if (this._scrollLocked || this._ZOOM_ANIM.active) {
+      this.settingScroll = true;
+      window.scrollTo(0, this.lastScrollY);
+      this.settingScroll = false;
+      return;
+    }
     if (this.settingScroll) return;
 
     const s = window.scrollY || window.pageYOffset || 0;
 
-    // Clamp to virtual-window bounds (safety)
     if (this.SCROLL_MIN != null && s < this.SCROLL_MIN - 1) {
       window.scrollTo(0, this.SCROLL_MIN);
       return;
@@ -368,11 +417,9 @@ export class App implements AfterViewInit, OnDestroy {
       return;
     }
 
-    // Compute center-year raw vs clamped
     const kyRaw = this.yToYearDev(this.CH / 2);
     const kyClamped = this.clampCenterToData(kyRaw);
 
-    // Are we *pushing past* dataset edges? (i.e., raw trying to go beyond the clamp)
     const es = this.getEntries();
     const EPS = 1e-7;
     let pushingPastTop = false;
@@ -384,22 +431,17 @@ export class App implements AfterViewInit, OnDestroy {
       pushingPastBottom = kyClamped >= maxY - EPS && kyRaw > kyClamped + EPS;
     }
 
-    // If user is pushing past the dataset, snap to the nearest virtual edge
-    // and preserve star phase + center-year anchoring.
     if (pushingPastTop || pushingPastBottom) {
-      const keep = kyClamped; // keep the edge date under the centerline
+      const keep = kyClamped;
       const target = pushingPastTop ? this.SCROLL_MIN ?? s : this.SCROLL_MAX ?? s;
 
-      // preserve on-screen star phase across this programmatic jump
       const sx = window.scrollX || window.pageXOffset || 0;
       this.starRender.rebasePhaseForProgrammaticScroll(sx, target);
 
-      // perform the snap-to-edge without re-entrancy
       this.settingScroll = true;
       window.scrollTo(0, target);
       this.settingScroll = false;
 
-      // keep the same date under the centerline and freeze parallax at the edge
       this.reanchorGridForCenter(keep);
       this.starParallaxScrollX = sx;
       this.starParallaxScrollY = target;
@@ -409,20 +451,16 @@ export class App implements AfterViewInit, OnDestroy {
       return;
     }
 
-    // Commit the clamped center and keep grid locked to it
     this.centerYF = kyClamped;
     this.reanchorGridForCenter(kyClamped);
 
-    // Effective parallax scroll (freeze when hard-clamped or at virtual edges)
     const rawSx = window.scrollX || window.pageXOffset || 0;
     const rawSy = s;
     let effSy = rawSy;
 
     if (pushingPastTop || pushingPastBottom) {
-      // Freeze parallax completely while hard-clamped at dataset bounds.
       effSy = this.starParallaxScrollY;
     } else {
-      // Directional freeze at virtual-window edges
       if (this.SCROLL_MIN != null && rawSy <= this.SCROLL_MIN + 0.5) {
         if (rawSy < this.starParallaxScrollY) effSy = this.starParallaxScrollY;
       }
@@ -431,20 +469,14 @@ export class App implements AfterViewInit, OnDestroy {
       }
     }
 
-    // Commit parallax drivers
     this.starParallaxScrollX = rawSx;
     this.starParallaxScrollY = effSy;
 
-    // Only update "last good" scroll when we are NOT pushing outward past an edge.
-    // (If pushing inward/back toward data, s will move toward lastScrollY and this is fine.)
     if (!(pushingPastTop && s < this.lastScrollY) && !(pushingPastBottom && s > this.lastScrollY)) {
       this.lastScrollY = s;
     }
 
-    // Draw everything
     this.redraw();
-
-    // Flip to opposite side of the virtual window when needed
     this.recenterVirtualWindowIfNeeded();
   }
 
@@ -521,7 +553,32 @@ export class App implements AfterViewInit, OnDestroy {
     this.dpr = this.DPR;
   }
 
-  // ── Data helpers / parsing ────────────────────────────────────────────────────
+  // ── Easing: accel→cruise→decel (non-recursive, area-normalized) ───────────────
+  private accelCruiseDecel(t: number, accelFrac: number = 0.18, decelFrac: number = 0.18): number {
+    t = this.clamp(t, 0, 1);
+    let a = Math.max(0, Math.min(0.45, accelFrac));
+    let d = Math.max(0, Math.min(0.45, decelFrac));
+    if (a + d > 0.95) {
+      const s = a + d;
+      a = (a / s) * 0.95;
+      d = (d / s) * 0.95;
+    }
+    const c = Math.max(0, 1 - a - d);
+    const vmax = 1 / (c + 0.5 * (a + d)); // area=1
+
+    if (t <= a) {
+      return (vmax * (t * t)) / (2 * Math.max(a, 1e-6));
+    }
+    if (t <= a + c) {
+      const f_acc = vmax * (a / 2);
+      return f_acc + vmax * (t - a);
+    }
+    const f_acc_cruise = vmax * (a / 2 + c);
+    const s = (t - (a + c)) / Math.max(d, 1e-6); // 0..1
+    return f_acc_cruise + vmax * (d * (s - 0.5 * s * s));
+  }
+
+  // ── Helpers: parsing / mapping ────────────────────────────────────────────────
   private clamp(v: number, a: number, b: number) {
     return v < a ? a : v > b ? b : v;
   }
@@ -536,9 +593,10 @@ export class App implements AfterViewInit, OnDestroy {
     return yf >= 0 ? Math.floor(yf) : Math.ceil(yf);
   }
 
-  private yearParseWithFlag(input: string | number) {
-    if (typeof input === 'number' && isFinite(input))
+  private yearParseWithFlag(input: string | number): { yf: number; yearOnly: boolean } {
+    if (typeof input === 'number' && isFinite(input)) {
       return { yf: input, yearOnly: Math.floor(input) === input };
+    }
     if (typeof input !== 'string') return { yf: NaN, yearOnly: false };
 
     const raw = input.normalize ? input.normalize('NFKC').trim() : String(input).trim();
@@ -558,18 +616,21 @@ export class App implements AfterViewInit, OnDestroy {
       'NOV',
       'DEC',
     ];
+
     let hasMonth = false;
     if (U) {
-      const p0 = U.split(',').join(' ').split(' ');
+      const p0 = U.split(',').join(' ').split(' ').filter(Boolean);
       if (p0.length) {
         const t0 = p0[0];
-        for (const m of months)
+        for (const m of months) {
           if (t0.indexOf(m) === 0) {
             hasMonth = true;
             break;
           }
+        }
       }
     }
+
     const yf = this.yearFractionFromInput(raw);
     const yearOnly = !hasMonth && isFinite(yf) && Math.floor(Math.abs(yf)) === Math.abs(yf);
     return { yf, yearOnly };
@@ -781,39 +842,26 @@ export class App implements AfterViewInit, OnDestroy {
     const yTopYear = this.yToYearDev(0);
     const yBotYear = this.yToYearDev(Hc);
 
-    // ── helpers ─────────────────────────────────────────────────────────────
-    // tolerant day-tier detector
-    const isDayTier = Math.abs(u - 1 / 365) < 1e-6 || Math.abs(u - 1 / 366) < 1e-6;
-
-    const nextMonthOrYearAtOrAbove = (y: number, stepYears: number) =>
-      y >= 0
-        ? Math.ceil(y / stepYears) * stepYears
-        : -Math.floor(Math.abs(y) / stepYears) * stepYears;
+    const rel = (a: number, b: number) => Math.abs(a - b) / Math.max(1e-9, Math.abs(b));
+    const isDayTier =
+      Math.abs(u - 1 / 365) < 1e-6 ||
+      Math.abs(u - 1 / 366) < 1e-6 ||
+      rel(u, 1 / this.MEAN_YEAR) < 0.01;
+    const isWeekTier = rel(u, 7 / this.MEAN_YEAR) < 0.02;
 
     const nextStepAtOrAbove = (y: number, step: number) =>
       y >= 0 ? Math.ceil(y / step) * step : -Math.floor(Math.abs(y) / step) * step;
 
-    // ── ticks ───────────────────────────────────────────────────────────────
-    if (isDayTier) {
-      // Uniform placement every 1/365 year to avoid gaps/stalls.
-      // Labels still use per-year day units (1/daysInYear(year)) for leap-year correctness.
+    if (isDayTier && !isWeekTier) {
       const step = 1 / 365;
-
       let yTick = nextStepAtOrAbove(yTopYear - 1e-9, step);
-
-      // Cap loop count based on visible span (prevents runaway loops).
       const visibleYears = Math.max(0, yBotYear - yTopYear);
       const maxTicks = Math.min(15000, Math.ceil(visibleYears / step) + 20);
-
       let safety = 0;
       while (yTick <= yBotYear + 1e-7 && safety++ < maxTicks) {
         const yPx = this.yearToY(yTick);
-
-        // tick
         ctx.fillStyle = this.GRID.color;
         ctx.fillRect(x0, Math.round(yPx - Math.floor(thick / 2)), segLen, thick);
-
-        // label (use per-year unit for leap correctness)
         const yr = yTick >= 0 ? Math.floor(yTick) : Math.ceil(yTick);
         const diy = this.daysInYear(yr);
         const label = this.formatLabelByUnit(yTick, 1 / diy);
@@ -821,13 +869,33 @@ export class App implements AfterViewInit, OnDestroy {
           ctx.fillStyle = 'rgba(255,170,80,0.95)';
           ctx.fillText(label, x0 - labelMargin, Math.round(yPx));
         }
+        yTick += step;
+      }
+    } else if (isWeekTier) {
+      const step = 7 / 365;
+      let yTick = nextStepAtOrAbove(yTopYear - 1e-9, step);
+      const visibleYears = Math.max(0, yBotYear - yTopYear);
+      const maxTicks = Math.min(6000, Math.ceil(visibleYears / step) + 20);
+      let safety = 0;
+      while (yTick <= yBotYear + 1e-7 && safety++ < maxTicks) {
+        const yPx = this.yearToY(yTick);
+        ctx.fillStyle = this.GRID.color;
+        ctx.fillRect(x0, Math.round(yPx - Math.floor(thick / 2)), segLen, thick);
 
+        const yr = yTick >= 0 ? Math.floor(yTick) : Math.ceil(yTick);
+        const diy = this.daysInYear(yr);
+        const frac = yTick - (yTick >= 0 ? Math.floor(yTick) : Math.ceil(yTick));
+        let dayOfYear = Math.floor(frac * diy);
+        dayOfYear = dayOfYear - (dayOfYear % 7); // week start
+        const label = this.labelFromDayOfYear(yr, dayOfYear);
+        if (label) {
+          ctx.fillStyle = 'rgba(255,170,80,0.95)';
+          ctx.fillText(label, x0 - labelMargin, Math.round(yPx));
+        }
         yTick += step;
       }
     } else {
-      // Original non-day path (Month/Year/Decade/Century/Millennium)
-      let yTick = nextMonthOrYearAtOrAbove(yTopYear - 1e-9, u);
-
+      let yTick = nextStepAtOrAbove(yTopYear - 1e-9, u);
       let safety = 0;
       while (yTick <= yBotYear + 1e-7 && safety++ < 4000) {
         const yPx = this.yearToY(yTick);
@@ -842,7 +910,7 @@ export class App implements AfterViewInit, OnDestroy {
       }
     }
 
-    // ── Today marker (unchanged) ────────────────────────────────────────────
+    // Today marker
     const yToday = Math.round(this.yearToY(this.nowYearFraction()));
     if (yToday >= -4 && yToday <= Hc + 4) {
       const ySeg = yToday - Math.floor(thick / 2);
@@ -875,16 +943,46 @@ export class App implements AfterViewInit, OnDestroy {
     }
   }
 
+  private labelFromDayOfYear(year: number, dayOfYear0: number): string {
+    const md = [31, this.isLeapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    const months2 = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    let mi = 0,
+      dleft = dayOfYear0;
+    while (mi < 12 && dleft >= md[mi]) {
+      dleft -= md[mi];
+      mi++;
+    }
+    if (mi > 11) {
+      mi = 11;
+      dleft = md[11] - 1;
+    }
+    const day = dleft + 1;
+    const yr = year < 0 ? -year : year;
+    const tail = year < 0 ? ' B.C.E.' : ' C.E.';
+    return `${months2[mi]} ${day}, ${yr}${tail}`;
+  }
+
   private drawHuds(fadeFrom = 1, fadeTo = 0) {
-    if (this.ZOOM_ANIM.active) {
+    if (this._ZOOM_ANIM.active) {
       const from = this.HUDS[this.animFromIdx];
       const to = this.HUDS[this.animToIdx];
 
-      // Use the *current step's* units, not the whole-jump units
-      const fromUnit = this.ZOOM_ANIM.hudStartUnit ?? this.ZOOM_ANIM.startUnit;
-      const toUnit = this.ZOOM_ANIM.hudEndUnit ?? this.ZOOM_ANIM.endUnit;
+      const fromUnit = this._ZOOM_ANIM.hudStartUnit ?? this._ZOOM_ANIM.startUnit;
+      const toUnit = this._ZOOM_ANIM.hudEndUnit ?? this._ZOOM_ANIM.endUnit;
 
-      // Debug visibility
       this.dbg('drawHuds(active)', {
         fromIdx: this.animFromIdx,
         toIdx: this.animToIdx,
@@ -894,22 +992,17 @@ export class App implements AfterViewInit, OnDestroy {
         fadeTo: +fadeTo.toFixed(2),
       });
 
-      // Clear only the two active layers
       from.ctx.clearRect(0, 0, this.W, this.H);
       to.ctx.clearRect(0, 0, this.W, this.H);
 
-      // Draw ticks using the *current step's* pair units.
-      // TL.unitYears (set in zoomTick) controls the mapping/stretching.
       this.drawHudLayer(from.ctx, this.W, this.H, fromUnit);
       this.drawHudLayer(to.ctx, this.W, this.H, toUnit);
 
-      // Programmatic opacities for the active pair
-      from.el.style.opacity = String(fadeFrom); // 1 → 0
-      to.el.style.opacity = String(fadeTo); // 0 → 1
+      from.el.style.opacity = String(fadeFrom);
+      to.el.style.opacity = String(fadeTo);
       return;
     }
 
-    // ── Non-anim: single active layer ──
     for (let i = 0; i < this.HUDS.length; i++) {
       const h = this.HUDS[i];
       h.ctx.clearRect(0, 0, this.W, this.H);
@@ -927,7 +1020,17 @@ export class App implements AfterViewInit, OnDestroy {
     const calYear = yf >= 0 ? Math.floor(yf) : Math.ceil(yf);
     let diy = this.daysInYear(calYear);
 
-    if (Math.abs(unit - 1 / diy) < 1e-7 || Math.abs(unit - 1 / 365) < 1e-7) {
+    const rel = (a: number, b: number) => Math.abs(a - b) / Math.max(1e-9, Math.abs(b));
+
+    // ── DAY tier detection (robust) ──
+    // Accept exact 1/diy, exact 1/365, or near 1/365.2425 (Gregorian mean) with tolerance.
+    const isDayTier =
+      Math.abs(unit - 1 / diy) < 1e-7 ||
+      Math.abs(unit - 1 / 365) < 1e-7 ||
+      rel(unit, 1 / this.MEAN_YEAR) < 0.02;
+
+    if (isDayTier) {
+      // Convert fractional year → Month/Day using the real days-in-year for the snapped year.
       let dayOfYear = Math.round(frac * diy);
       if (dayOfYear === diy) {
         dayOfYear = 0;
@@ -967,6 +1070,16 @@ export class App implements AfterViewInit, OnDestroy {
       return `${months2[mi]} ${day}, ${yr3}${tail2}`;
     }
 
+    // ── WEEK (approx) ──
+    if (rel(unit, 7 / this.MEAN_YEAR) < 0.02) {
+      const year = calYear;
+      const diyL = this.daysInYear(year);
+      let dayOfYear = Math.floor(frac * diyL);
+      dayOfYear = dayOfYear - (dayOfYear % 7); // start of week
+      return this.labelFromDayOfYear(year, dayOfYear);
+    }
+
+    // ── MONTH ──
     if (Math.abs(unit - 1 / 12) < 1e-7) {
       let m = Math.round(frac * 12);
       if (m === 12) {
@@ -993,6 +1106,7 @@ export class App implements AfterViewInit, OnDestroy {
       return `${months[m]} ${yr2}${tail}`;
     }
 
+    // ── YEAR+ ──
     if (unit >= 1) {
       const yr = isBCE ? -Math.round(abs) : Math.round(abs);
       return yr < 0 ? `${-yr} B.C.E.` : `${yr} C.E.`;
@@ -1100,8 +1214,8 @@ export class App implements AfterViewInit, OnDestroy {
       const a = pts[i],
         b = pts[i + 1];
       const y1 = a.y,
-        y2 = b.y,
-        lo = Math.min(y1, y2),
+        y2 = b.y;
+      const lo = Math.min(y1, y2),
         hi = Math.max(y1, y2);
       if (hi <= ny) seg(y1, y2, this.TL.linePast, false);
       else if (lo >= ny) seg(y1, y2, this.TL.lineFuture, true);
@@ -1140,7 +1254,7 @@ export class App implements AfterViewInit, OnDestroy {
     }
   }
 
-  // ── Virtual window flipping ───────────────────────────────────────────────────
+  // ── Virtual window helpers ────────────────────────────────────────────────────
   private atDatasetStart(): boolean {
     const es = this.getEntries();
     if (!es.length) return true;
@@ -1198,7 +1312,7 @@ export class App implements AfterViewInit, OnDestroy {
   }
 
   private recenterVirtualWindowIfNeeded() {
-    if (!this.useVirtualWindow || this.ZOOM_ANIM.active) return;
+    if (!this.useVirtualWindow || this._ZOOM_ANIM.active) return;
     const s = window.scrollY || window.pageYOffset || 0;
     const min = this.SCROLL_MIN ?? 0;
     const max = this.SCROLL_MAX ?? 0;
@@ -1230,23 +1344,27 @@ export class App implements AfterViewInit, OnDestroy {
     }
   }
 
-  // ── Zoom logic (stepwise HUD pairs, single smooth star/timeline) ──────────────
+  private get useVirtualWindow() {
+    return true;
+  }
+
+  // ── Zoom logic ────────────────────────────────────────────────────────────────
   private clampZoomIndex(idx: number) {
     if (idx < 0) idx = 0;
     else if (idx >= this.zoomLevels.length) idx = this.zoomLevels.length - 1;
     return idx;
   }
 
-  // ── Zoom logic: chained HUD steps @ capped speed; single smooth star/timeline ──
   private setZoomIndex(idx: number) {
     idx = this.clampZoomIndex(idx);
     if (idx === this.currentZoomIdx) return;
 
-    // Finish any running anim
-    if (this.ZOOM_ANIM.active) {
-      this.TL.unitYears = this.ZOOM_ANIM.endUnit;
-      this.currentZoomIdx = this.ZOOM_ANIM.targetIdx;
-      this.ZOOM_ANIM.active = false;
+    // Finish any running anim instantly
+    if (this._ZOOM_ANIM.active) {
+      this.TL.unitYears = this._ZOOM_ANIM.endUnit;
+      this.currentZoomIdx = this._ZOOM_ANIM.targetIdx;
+      this._ZOOM_ANIM.active = false;
+      this.unlockScrollingHard();
     }
 
     const keepYear = this.centerYF ?? this.yToYearDev(this.CH / 2);
@@ -1258,7 +1376,10 @@ export class App implements AfterViewInit, OnDestroy {
     const endUnit = this.zoomLevels[endIdx].unit;
     const dir = endIdx > startIdx ? 1 : -1;
 
-    // Freeze stars once for the whole jump
+    // 1) LOCK SCROLL during the whole animation
+    this.lockScrollingHard();
+
+    // 2) Freeze star phase once for the entire jump
     const lock = this.starRender.freezePhaseForZoom(
       this.starBaseScaleByLevel[startIdx],
       this.starBaseScaleByLevel[endIdx]
@@ -1270,7 +1391,7 @@ export class App implements AfterViewInit, OnDestroy {
     this.starZoom.lockOffY = lock.lockOffY;
     this.starEffectiveScale = this.starZoom.from;
 
-    // Seed first HUD pair (just for layer selection/opacity)
+    // First HUD pair opacities only
     const fromIdxSeed = startIdx;
     const toIdxSeed = startIdx + dir;
     for (let i = 0; i < this.HUDS.length; i++) {
@@ -1281,29 +1402,39 @@ export class App implements AfterViewInit, OnDestroy {
       else if (i === toIdxSeed) el.style.opacity = '0';
     }
 
-    // Build the sequence of units across boundaries (e.g. 1000→100→10→1→1/12→1/365)
+    // Build path across units
     const unitsSeq: number[] = [];
     for (let i = startIdx; i !== endIdx; i += dir) unitsSeq.push(this.zoomLevels[i].unit);
     unitsSeq.push(this.zoomLevels[endIdx].unit);
 
-    // Per-step log distances (geometric distance). Guard against bad ratios.
     const stepDist: number[] = [];
     for (let i = 0; i < unitsSeq.length - 1; i++) {
       const a = unitsSeq[i],
         b = unitsSeq[i + 1];
       const r = b / a;
-      const d = r > 0 && isFinite(r) ? Math.abs(Math.log(r)) : Math.abs(b - a); // fallback linear
+      const d = r > 0 && isFinite(r) ? Math.abs(Math.log(r)) : Math.abs(b - a);
       stepDist.push(d);
     }
     const cumDist: number[] = [0];
     for (let i = 0; i < stepDist.length; i++) cumDist.push(cumDist[i] + stepDist[i]);
     const totalDist = cumDist[cumDist.length - 1] || 1;
 
+    // Duration proportional to steps
     const steps = Math.max(1, Math.abs(endIdx - startIdx));
-    const perStepMs = this.ONE_LEVEL_MS; // keep your single-level feel per boundary
-    const totalDur = perStepMs * steps; // HUD & stars share this duration
+    const totalDur = this.ONE_LEVEL_MS * steps;
 
-    this.ZOOM_ANIM = {
+    // Live caption during transition
+    this._zoomStepLabel = `${this.zoomLevels[startIdx].name} > ${this.zoomLevels[endIdx].name}`;
+
+    // Prime the slider to the start position (fractional allowed)
+    this.setSliderVisualIndex(startIdx);
+
+    // Set document.title hint
+    const oldTitle = document.title;
+    document.title = `${this._zoomStepLabel} — ${oldTitle.replace(/^(.*?)( — )?/, '')}`;
+
+    // Seed animation state
+    this._ZOOM_ANIM = {
       active: true,
       t0: performance && performance.now ? performance.now() : Date.now(),
       dur: totalDur,
@@ -1323,63 +1454,50 @@ export class App implements AfterViewInit, OnDestroy {
       startIdx,
       endIdx,
 
-      // new: geometric path info
-      // @ts-ignore – extending the shape without changing its declared type
       unitsSeq,
-      // @ts-ignore
       stepDist,
-      // @ts-ignore
       cumDist,
-      // @ts-ignore
       totalDist,
-    } as any;
+    };
 
     this.animFromIdx = fromIdxSeed;
     this.animToIdx = toIdxSeed;
 
-    // First exact frame
+    // First frame
     this.TL.unitYears = startUnit;
+    this._zoomVisualIndex = startIdx;
     this.redraw(1, 0);
+
     requestAnimationFrame(this.zoomTick);
   }
 
-  private easeOutCubic(t: number) {
-    return 1 - Math.pow(1 - t, 3);
-  }
   private lerp(a: number, b: number, t: number) {
     return a + (b - a) * t;
   }
 
   private zoomTick = () => {
-    if (!this.ZOOM_ANIM.active) return;
+    if (!this._ZOOM_ANIM.active) return;
 
     const now = performance && performance.now ? performance.now() : Date.now();
-    const elapsed = Math.max(0, now - this.ZOOM_ANIM.t0);
-    const totalMs = this.ZOOM_ANIM.dur;
-    const g = this.clamp(elapsed / totalMs, 0, 1); // single global clock
+    const elapsed = Math.max(0, now - this._ZOOM_ANIM.t0);
+    const totalMs = this._ZOOM_ANIM.dur;
 
-    // Keep stars moving uniformly and only ease in the last bit.
-    const EASE_TAIL = 0.12; // last 12% gets a soft ease-out
-    let starP: number;
-    if (g <= 1 - EASE_TAIL) {
-      // strictly linear up to the tail so it never looks like it stalls
-      starP = g * (1 / (1 - EASE_TAIL)) * (1 - EASE_TAIL);
-    } else {
-      // gentle ease only in the last tail segment
-      const local = (g - (1 - EASE_TAIL)) / EASE_TAIL; // 0..1
-      starP = 1 - EASE_TAIL + this.easeOutCubic(local) * EASE_TAIL;
-    }
+    // Global progress 0..1
+    const g = this.clamp(elapsed / totalMs, 0, 1);
 
-    // Geometric HUD path (continuous across all steps)
-    const unitsSeq: number[] = (this.ZOOM_ANIM as any).unitsSeq;
-    const stepDist: number[] = (this.ZOOM_ANIM as any).stepDist;
-    const cumDist: number[] = (this.ZOOM_ANIM as any).cumDist;
-    const totalDist: number = (this.ZOOM_ANIM as any).totalDist || 1;
+    // Spaceship profile for BOTH stars and HUD path
+    const ship = this.accelCruiseDecel(g, 0.18, 0.18);
 
-    // Distance we should have covered by now along the piecewise-log path
-    const dTarget = g * totalDist;
+    // Path info
+    const unitsSeq: number[] = this._ZOOM_ANIM.unitsSeq!;
+    const stepDist: number[] = this._ZOOM_ANIM.stepDist!;
+    const cumDist: number[] = this._ZOOM_ANIM.cumDist!;
+    const totalDist: number = this._ZOOM_ANIM.totalDist || 1;
 
-    // Find current segment i such that cumDist[i] <= dTarget <= cumDist[i+1]
+    // Target distance along the piecewise-log path
+    const dTarget = ship * totalDist;
+
+    // Find current segment
     let i = 0;
     while (i < stepDist.length - 1 && dTarget > cumDist[i + 1]) i++;
 
@@ -1388,52 +1506,56 @@ export class App implements AfterViewInit, OnDestroy {
 
     const a = unitsSeq[i];
     const b = unitsSeq[i + 1];
-    const r = b > 0 && a > 0 ? b / a : 1; // guard
-    // geometric interpolation: u = a * r^segT
+    const r = b > 0 && a > 0 ? b / a : 1;
     const unitThisFrame =
-      r > 0 && isFinite(r) ? a * Math.exp(Math.log(r) * segT) : this.lerp(a, b, segT); // fallback linear if something goes weird
+      r > 0 && isFinite(r) ? a * Math.exp(Math.log(r) * segT) : this.lerp(a, b, segT);
 
+    // Apply mapping
     this.TL.unitYears = unitThisFrame;
 
-    // Keep the same date under the centerline
-    const ky = this.ZOOM_ANIM.keepYear!;
+    // Center anchoring
+    const ky = this._ZOOM_ANIM.keepYear!;
     this.centerYF = this.clampCenterToData(ky);
     this.reanchorGridForCenter(ky);
 
-    // Stars follow the global progress
+    // Stars follow the same "ship" progress
     this.starEffectiveScale = this.lerp(
-      this.ZOOM_ANIM.starFromScale!,
-      this.ZOOM_ANIM.starToScale!,
-      starP
+      this._ZOOM_ANIM.starFromScale!,
+      this._ZOOM_ANIM.starToScale!,
+      ship
     );
 
-    // HUD pair selection and fade based on current segment
-    const startIdx = this.ZOOM_ANIM.startIdx!;
-    const endIdx = this.ZOOM_ANIM.endIdx!;
+    // Active HUD pair & fade
+    const startIdx = this._ZOOM_ANIM.startIdx!;
+    const endIdx = this._ZOOM_ANIM.endIdx!;
     const dir = endIdx > startIdx ? 1 : -1;
 
     const curFromIdx = startIdx + i * dir;
     const curToIdx = curFromIdx + dir;
 
     if (curFromIdx !== this.animFromIdx || curToIdx !== this.animToIdx) {
-      this.ZOOM_ANIM.hudFromIdx = curFromIdx;
-      this.ZOOM_ANIM.hudToIdx = curToIdx;
-      this.ZOOM_ANIM.hudStartUnit = this.zoomLevels[curFromIdx].unit;
-      this.ZOOM_ANIM.hudEndUnit = this.zoomLevels[curToIdx].unit;
+      this._ZOOM_ANIM.hudFromIdx = curFromIdx;
+      this._ZOOM_ANIM.hudToIdx = curToIdx;
+      this._ZOOM_ANIM.hudStartUnit = this.zoomLevels[curFromIdx].unit;
+      this._ZOOM_ANIM.hudEndUnit = this.zoomLevels[curToIdx].unit;
       this.animFromIdx = curFromIdx;
       this.animToIdx = curToIdx;
       this.HUDS[this.animFromIdx].el.style.opacity = '1';
       this.HUDS[this.animToIdx].el.style.opacity = '0';
     }
 
-    // Cross-fade strictly by segT (0..1) so no “heartbeat” at boundaries
     const fadeTo = segT;
     const fadeFrom = 1 - fadeTo;
 
-    // Draw
+    // Visual slider position (fractional)
+    const visualIndex = startIdx + dir * (i + segT);
+    this._zoomVisualIndex = visualIndex;
+    this.setSliderVisualIndex(this._zoomVisualIndex); // glide the thumb
+
+    // Draw frame
     this.redraw(fadeFrom, fadeTo);
 
-    // Maintain bounds while the mapping changes
+    // Keep bounds aligned while mapping changes
     this.updateScrollBounds();
     this.ensureScrollRoomFromBounds();
 
@@ -1443,10 +1565,19 @@ export class App implements AfterViewInit, OnDestroy {
     }
 
     // ── Finish ──
-    this.TL.unitYears = this.ZOOM_ANIM.endUnit;
-    this.currentZoomIdx = this.ZOOM_ANIM.targetIdx;
-    this.ZOOM_ANIM.active = false;
+    this.TL.unitYears = this._ZOOM_ANIM.endUnit;
+    this.currentZoomIdx = this._ZOOM_ANIM.targetIdx;
 
+    // Snap final slider position & restore caption to the settled level
+    this.setSliderVisualIndex(this.currentZoomIdx);
+    this._zoomStepLabel = ''; // template can show current level name
+
+    this._ZOOM_ANIM.active = false;
+
+    // Restore title
+    document.title = document.title.replace(/^[^—]+ —\s*/, '');
+
+    // Re-anchor & finalize
     this.reanchorGridForCenter(ky);
     this.updateScrollBounds();
     this.ensureScrollRoomFromBounds();
@@ -1465,8 +1596,12 @@ export class App implements AfterViewInit, OnDestroy {
     this.starEffectiveScale = this.starBaseScaleByLevel[this.currentZoomIdx];
     this.starRender.endZoomFreezeAndMatchPhase();
 
+    // Unlock scroll AFTER the final frame
+    this.unlockScrollingHard();
+
     this.redraw();
 
+    // Restore CSS-driven visibility
     for (let j = 0; j < this.HUDS.length; j++) {
       const el = this.HUDS[j].el;
       el.classList.remove('no-anim');
@@ -1475,4 +1610,28 @@ export class App implements AfterViewInit, OnDestroy {
       else el.classList.add('hud-hidden');
     }
   };
+
+  // ── Scroll locks ──────────────────────────────────────────────────────────────
+  private lockScrollingHard() {
+    if (this._scrollLocked) return;
+    this._scrollLocked = true;
+
+    const de = document.documentElement as HTMLElement;
+    this.prevDocOverflow = de.style.overflowY ?? '';
+    this.prevDocOverscroll = (de.style as any).overscrollBehavior ?? '';
+
+    de.style.overflowY = 'hidden';
+    (de.style as any).overscrollBehavior = 'none';
+  }
+  private unlockScrollingHard() {
+    if (!this._scrollLocked) return;
+    this._scrollLocked = false;
+
+    const de = document.documentElement as HTMLElement;
+    if (this.prevDocOverflow != null) de.style.overflowY = this.prevDocOverflow;
+    if (this.prevDocOverscroll != null)
+      (de.style as any).overscrollBehavior = this.prevDocOverscroll;
+  }
+  private prevDocOverflow: string | null = null;
+  private prevDocOverscroll: string | null = null;
 }

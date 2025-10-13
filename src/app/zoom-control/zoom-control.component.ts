@@ -5,14 +5,14 @@ import { Component, EventEmitter, Input, Output } from '@angular/core';
   standalone: true,
   template: `
     <div class="zoomUI">
-      <div class="zoomLabel">Zoom: {{ labelFor(value) }}</div>
+      <div class="zoomLabel">Zoom: {{ captionOverride ?? labelFor(value) }}</div>
       <input
         class="slider"
         type="range"
         [min]="min"
         [max]="max"
-        step="1"
-        [value]="value"
+        step="any"
+        [value]="visualIndex ?? value"
         [disabled]="disabled"
         (input)="onInput($event)"
         (change)="onChange($event)"
@@ -89,12 +89,17 @@ import { Component, EventEmitter, Input, Output } from '@angular/core';
   ],
 })
 export class ZoomControlComponent {
-  /** 0-based current index */
+  /** Current *settled* index (integer) */
   @Input() value = 0;
+  /** Optional fractional thumb position during animation */
+  @Input() visualIndex: number | null = null;
+  /** Optional caption override during transitions (e.g. "Month > Week") */
+  @Input() captionOverride: string | null = null;
+
   /** inclusive min/max for the slider */
   @Input() min = 0;
   @Input() max = 5;
-  /** Labels to show for each index (e.g., ["Day","Month","Year",...]) */
+  /** Labels to show for each index (e.g., ["Day","Week","Month","Year",...]) */
   @Input() labels: string[] = [];
   /** Disable interaction */
   @Input() disabled = false;

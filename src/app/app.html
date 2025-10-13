@@ -12,10 +12,13 @@
 
 <!-- Zoom UI -->
 <app-zoom-control
-  [labels]="zoomLabels"
   [min]="0"
   [max]="zoomLevels.length - 1"
+  [labels]="zoomLabels"
   [value]="currentZoomIdx"
+  [visualIndex]="zoomVisualIndex"
+  [captionOverride]="zoomStepLabel || null"
+  [disabled]="scrollLocked || ZOOM_ANIM.active"
   (inputValue)="onZoomInput($event)"
   (valueChange)="onZoomChange($event)"
 />
