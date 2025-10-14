@@ -122,7 +122,7 @@ export class App implements AfterViewInit, OnDestroy {
   private lastScrollY = 0;
 
   private readonly EDGE_PAD = 32;
-  private readonly ONE_LEVEL_MS = 2500;
+  private readonly ONE_LEVEL_MS = 1660; // ~10s total across 6 steps
 
   // HUD canvas list
   private HUDS: Array<{
@@ -1469,7 +1469,7 @@ export class App implements AfterViewInit, OnDestroy {
     const g = this.clamp(elapsed / totalMs, 0, 1);
 
     // Spaceship profile for BOTH stars and HUD path
-    const ship = this.accelCruiseDecel(g, 0.18, 0.18);
+    const ship = this.accelCruiseDecel(g, 0.34, 0.34);
 
     // Path info
     const unitsSeq: number[] = this._ZOOM_ANIM.unitsSeq!;
