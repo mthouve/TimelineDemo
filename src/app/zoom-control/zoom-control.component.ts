@@ -28,7 +28,7 @@ import { CommonModule } from '@angular/common';
               class="tick"
               *ngFor="let t of ticks"
               [style.left.%]="posFor(t)"
-              [attr.title]="labels?.[t] ?? t"
+              [attr.title]="labels[t]"
             ></div>
           </div>
         </div>
