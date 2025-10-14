@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output } from '@angular/core';
+import { Component, EventEmitter, Input, Output, OnChanges, SimpleChanges } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
 @Component({
@@ -10,27 +10,37 @@ import { CommonModule } from '@angular/common';
       <div class="zoomLabel">Zoom: {{ captionOverride ?? labelFor(value) }}</div>
 
       <div class="sliderWrap">
-        <!-- Visual track -->
-        <div class="track"></div>
+        <div class="inner">
+          <!-- Base orange track -->
+          <div class="track"></div>
 
-        <!-- Ticks (aligned to track, centered vertically) -->
-        <div class="ticks">
+          <!-- Progress bridge (solid orange) -->
           <div
-            class="tick"
-            *ngFor="let t of ticks"
-            [style.left.%]="pctFor(t)"
-            [attr.title]="labels && labels[t] !== undefined ? labels[t] : t"
+            class="bridge"
+            *ngIf="bridgeVisible"
+            [style.left.%]="bridgeLeft"
+            [style.width.%]="bridgeWidth"
           ></div>
+
+          <!-- Ticks (allow slight overhang at ends) -->
+          <div class="ticks">
+            <div
+              class="tick"
+              *ngFor="let t of ticks"
+              [style.left.%]="posFor(t)"
+              [attr.title]="labels?.[t] ?? t"
+            ></div>
+          </div>
         </div>
 
-        <!-- Native range (thumb only) -->
+        <!-- Native range (thumb only; track is transparent) -->
         <input
           class="slider"
           type="range"
           [min]="min"
           [max]="max"
-          step="any"
-          [value]="visualIndex ?? value"
+          step="1"
+          [value]="value"
           [disabled]="disabled"
           (input)="onInput($event)"
           (change)="onChange($event)"
@@ -40,14 +50,13 @@ import { CommonModule } from '@angular/common';
   `,
   styles: [
     `
-      /* --- sizing + spacing knobs --- */
       :host {
-        --track-w: 240px; /* visible track length (between side gaps) */
-        --track-h: 6px; /* visible track thickness */
-        --thumb-d: 16px; /* thumb diameter */
-        --side-gap: 12px; /* padding left/right around track so thumb doesn't hit the box edge */
-        --wrap-h: 30px; /* overall control box height for comfortable hit area */
         display: contents;
+        --trackH: 6px; /* bar height */
+        --thumb: 16px; /* thumb diameter */
+        --padX: 12px; /* inner padding so bar isn’t edge-to-edge */
+        --tickW: 2px; /* tick width */
+        --thumbOffsetY: -3px; /* fine-tune vertical nudge (up = negative) */
       }
 
       .zoomUI {
@@ -70,84 +79,101 @@ import { CommonModule } from '@angular/common';
 
       .sliderWrap {
         position: relative;
-        width: calc(var(--track-w) + 2 * var(--side-gap));
-        height: var(--wrap-h);
+        width: 240px;
+        height: 30px;
+      }
+      .inner {
+        position: absolute;
+        left: var(--padX);
+        right: var(--padX);
+        top: 0;
+        bottom: 0;
+        /* allow ticks to overhang half their width so end ticks look same width */
+        overflow: visible;
       }
 
-      /* Visible track (centered vertically) */
+      /* Square track, vertically centered */
       .track {
         position: absolute;
-        left: var(--side-gap);
-        right: var(--side-gap);
+        left: 0;
+        right: 0;
         top: 50%;
         transform: translateY(-50%);
-        height: var(--track-h);
+        height: var(--trackH);
         background: rgba(255, 150, 60, 0.45);
-        border-radius: 0; /* no rounding per your request */
-        pointer-events: none;
+        border-radius: 0; /* square ends */
         z-index: 1;
+        pointer-events: none;
       }
 
-      /* Ticks: sit above track; each tick is centered on its x-position */
+      /* Orange progress bridge above track, below thumb */
+      .bridge {
+        position: absolute;
+        top: 50%;
+        transform: translateY(-50%);
+        height: var(--trackH);
+        background: rgba(255, 150, 60, 0.95);
+        border-radius: 0; /* square ends */
+        z-index: 2;
+        pointer-events: none;
+      }
+
+      /* Ticks occupy the bar height; square; slight overhang allowed */
       .ticks {
         position: absolute;
-        left: var(--side-gap);
-        right: var(--side-gap);
+        left: calc(0px - var(--tickW) / 2);
+        right: calc(0px - var(--tickW) / 2);
         top: 50%;
-        transform: translateY(-50%); /* exact vertical center */
-        height: 12px; /* extends above & below the track */
+        transform: translateY(-50%);
+        height: var(--trackH);
+        z-index: 3;
         pointer-events: none;
-        z-index: 2;
       }
       .tick {
         position: absolute;
-        top: 50%;
-        width: 2px;
-        height: 12px;
-        transform: translate(-1px, -50%); /* center the 2px tick on its x-position */
-        background: rgba(255, 150, 60, 0.9);
-        box-shadow: 0 0 6px rgba(255, 150, 60, 0.45);
-        border-radius: 0;
+        top: 0;
+        width: var(--tickW);
+        height: 100%;
+        transform: translateX(calc(-1 * var(--tickW) / 2)); /* center on x-position */
+        background: rgba(255, 150, 60, 0.95);
+        border-radius: 0; /* square */
+        box-shadow: none;
       }
 
-      /* The native range input: thumb only */
+      /* Native slider, thumb centered on bar; no native track */
       .slider {
         position: absolute;
-        /* Inset by half the thumb so the thumb CENTER aligns with the track ends */
-        left: calc(var(--side-gap) - var(--thumb-d) / 2);
-        right: calc(var(--side-gap) - var(--thumb-d) / 2);
-
+        left: calc(var(--padX) - 0.5 * var(--thumb));
+        right: calc(var(--padX) - 0.5 * var(--thumb));
         top: 50%;
         transform: translateY(-50%);
-        width: auto; /* don't stretch to wrapper; we control with left/right */
-        height: var(--track-h); /* keep vertical centering */
+        height: var(--trackH);
+        z-index: 4;
+
         appearance: none;
         -webkit-appearance: none;
         background: transparent;
         outline: none;
+        border: 0;
         margin: 0;
         padding: 0;
-        z-index: 3; /* thumb above track & ticks */
       }
-
-      /* Neutralize the native track so it doesn't affect layout/centering */
       .slider::-webkit-slider-runnable-track {
-        height: var(--track-h);
+        height: 0;
         background: transparent;
       }
       .slider::-moz-range-track {
-        height: var(--track-h);
+        height: 0;
         background: transparent;
       }
 
-      /* Thumb perfectly centered on the visible track:
-       margin-top = (track-h - thumb-d) / 2  */
       .slider::-webkit-slider-thumb {
         -webkit-appearance: none;
         appearance: none;
-        width: var(--thumb-d);
-        height: var(--thumb-d);
-        margin-top: calc((var(--track-h) - var(--thumb-d)) / 2);
+        width: var(--thumb);
+        height: var(--thumb);
+        /* center over the track + fine nudge */
+        margin-top: calc((var(--trackH) - var(--thumb)) / 2 + var(--thumbOffsetY));
         border-radius: 50%;
         background: rgba(255, 150, 60, 0.95);
         box-shadow: 0 0 10px rgba(255, 150, 60, 0.7);
@@ -155,8 +181,8 @@ import { CommonModule } from '@angular/common';
         cursor: pointer;
       }
       .slider::-moz-range-thumb {
-        width: var(--thumb-d);
-        height: var(--thumb-d);
+        width: var(--thumb);
+        height: var(--thumb);
         border-radius: 50%;
         background: rgba(255, 150, 60, 0.95);
         box-shadow: 0 0 10px rgba(255, 150, 60, 0.7);
@@ -166,38 +192,44 @@ import { CommonModule } from '@angular/common';
     `,
   ],
 })
-export class ZoomControlComponent {
-  /** Current *settled* index (integer) */
+export class ZoomControlComponent implements OnChanges {
+  /** Settled index (integer) — THUMB USES THIS ONLY (no animation) */
   @Input() value = 0;
-  /** Optional fractional thumb position during animation */
-  @Input() visualIndex: number | null = null;
-  /** Optional caption override during transitions (e.g., "Month > Week") */
+  /** Optional caption override */
   @Input() captionOverride: string | null = null;
+
+  /** Progress bridge endpoints (fractional ok); when null → hide bridge */
+  @Input() bridgeStart: number | null = null;
+  @Input() bridgeEnd: number | null = null;
 
   /** inclusive min/max for the slider */
   @Input() min = 0;
   @Input() max = 5;
-  /** Labels to show for each index (e.g., ["Day","Week","Month","Year",...]) */
+  /** Labels for stops */
   @Input() labels: string[] = [];
   /** Disable interaction */
   @Input() disabled = false;
 
-  /** Fires on every drag (live update) */
+  /** Emits on drag */
   @Output() inputValue = new EventEmitter<number>();
-  /** Fires on commit (mouseup / change) */
+  /** Emits on release */
   @Output() valueChange = new EventEmitter<number>();
 
-  /** Ticks: one per stop */
-  get ticks(): number[] {
-    const out: number[] = [];
-    for (let i = this.min; i <= this.max; i++) out.push(i);
-    return out;
-  }
+  ticks: number[] = [];
 
-  /** Position along the track in percent (0..100), inclusive */
-  pctFor(idx: number): number {
-    if (this.max <= this.min) return 0;
-    return ((idx - this.min) / (this.max - this.min)) * 100;
+  // Bridge geometry (% of inner width)
+  bridgeVisible = false;
+  bridgeLeft = 0;
+  bridgeWidth = 0;
+
+  ngOnChanges(ch: SimpleChanges): void {
+    if (ch['min'] || ch['max']) {
+      this.ticks = [];
+      for (let i = this.min; i <= this.max; i++) this.ticks.push(i);
+    }
+    if (ch['bridgeStart'] || ch['bridgeEnd'] || ch['min'] || ch['max']) {
+      this.updateBridge();
+    }
   }
 
   labelFor(v: number): string {
@@ -205,16 +237,50 @@ export class ZoomControlComponent {
   }
 
   onInput(evt: Event) {
-    const v = (evt.target as HTMLInputElement).valueAsNumber;
-    this.inputValue.emit(this.clamp(v));
+    const el = evt.target as HTMLInputElement;
+    const raw = el.valueAsNumber;
+    const snapped = this.clamp(Math.round(raw));
+    // force the thumb to the snapped tick immediately
+    if (snapped !== raw) el.value = String(snapped);
+    this.inputValue.emit(snapped);
   }
+
   onChange(evt: Event) {
-    const v = (evt.target as HTMLInputElement).valueAsNumber;
-    this.valueChange.emit(this.clamp(v));
+    const el = evt.target as HTMLInputElement;
+    const raw = el.valueAsNumber;
+    const snapped = this.clamp(Math.round(raw));
+    if (snapped !== raw) el.value = String(snapped);
+    this.valueChange.emit(snapped);
   }
+
   private clamp(v: number) {
     if (v < this.min) return this.min;
     if (v > this.max) return this.max;
     return Math.round(v);
+  }
+
+  /** Map an index (can be fractional) → % position across inner track */
+  posFor(v: number): number {
+    if (!isFinite(v)) return 0;
+    const span = this.max - this.min || 1;
+    return ((v - this.min) / span) * 100;
+  }
+
+  private updateBridge() {
+    const a = this.bridgeStart;
+    const b = this.bridgeEnd;
+    if (a == null || b == null || !isFinite(a) || !isFinite(b)) {
+      this.bridgeVisible = false;
+      this.bridgeLeft = 0;
+      this.bridgeWidth = 0;
+      return;
+    }
+    const pa = this.posFor(a);
+    const pb = this.posFor(b);
+    const left = Math.min(pa, pb);
+    const width = Math.abs(pb - pa);
+    this.bridgeVisible = width > 0.05;
+    this.bridgeLeft = left;
+    this.bridgeWidth = width;
   }
 }

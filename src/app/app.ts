@@ -348,20 +348,6 @@ export class App implements AfterViewInit, OnDestroy {
     }
   };
 
-  // For driving the thumb visually during animation (no component API required)
-  private getZoomSliderEl(): HTMLInputElement | null {
-    return document.querySelector(
-      'app-zoom-control input[type="range"]'
-    ) as HTMLInputElement | null;
-  }
-  private setSliderVisualIndex(idx: number) {
-    const el = this.getZoomSliderEl();
-    if (!el) return;
-    el.value = String(idx);
-    el.setAttribute('aria-valuenow', el.value);
-    (el as any).style?.setProperty?.('--zoom-visual-index', String(idx));
-  }
-
   // ── Host listeners ────────────────────────────────────────────────────────────
   @HostListener('window:resize')
   onResize() {
@@ -1426,9 +1412,6 @@ export class App implements AfterViewInit, OnDestroy {
     // Live caption during transition
     this._zoomStepLabel = `${this.zoomLevels[startIdx].name} > ${this.zoomLevels[endIdx].name}`;
 
-    // Prime the slider to the start position (fractional allowed)
-    this.setSliderVisualIndex(startIdx);
-
     // Set document.title hint
     const oldTitle = document.title;
     document.title = `${this._zoomStepLabel} — ${oldTitle.replace(/^(.*?)( — )?/, '')}`;
@@ -1550,7 +1533,6 @@ export class App implements AfterViewInit, OnDestroy {
     // Visual slider position (fractional)
     const visualIndex = startIdx + dir * (i + segT);
     this._zoomVisualIndex = visualIndex;
-    this.setSliderVisualIndex(this._zoomVisualIndex); // glide the thumb
 
     // Draw frame
     this.redraw(fadeFrom, fadeTo);
@@ -1569,7 +1551,6 @@ export class App implements AfterViewInit, OnDestroy {
     this.currentZoomIdx = this._ZOOM_ANIM.targetIdx;
 
     // Snap final slider position & restore caption to the settled level
-    this.setSliderVisualIndex(this.currentZoomIdx);
     this._zoomStepLabel = ''; // template can show current level name
 
     this._ZOOM_ANIM.active = false;
