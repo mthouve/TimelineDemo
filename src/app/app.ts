@@ -98,6 +98,10 @@ export class App implements AfterViewInit, OnDestroy {
   // Match #levels length
   private readonly starBaseScaleByLevel = [1.12, 1.08, 1.05, 1.0, 0.96, 0.93, 0.9];
 
+  // Timing targets
+  private readonly DUR_SINGLE_STEP_MS = 4000; // ~4s for 1-step jumps
+  private readonly DUR_ACROSS_ALL_MS = 10000; // ~10s for full-range jumps
+
   // ── Starfield / zoom state ───────────────────────────────────────────────────
   private starEffectiveScale = this.starBaseScaleByLevel[this.currentZoomIdx];
   private starZoom = {
@@ -1407,7 +1411,13 @@ export class App implements AfterViewInit, OnDestroy {
 
     // Duration proportional to steps
     const steps = Math.max(1, Math.abs(endIdx - startIdx));
-    const totalDur = this.ONE_LEVEL_MS * steps;
+    // Duration scales from ~4s (1 step) up to ~10s (max steps) with convex compression.
+    const allSteps = Math.max(1, this.zoomLevels.length - 1);
+    const norm = allSteps > 1 ? (steps - 1) / (allSteps - 1) : 0; // 0..1
+    const emph = norm * norm; // bias more compression for longer jumps
+    const totalDur = Math.round(
+      this.DUR_SINGLE_STEP_MS + (this.DUR_ACROSS_ALL_MS - this.DUR_SINGLE_STEP_MS) * emph
+    );
 
     // Live caption during transition
     this._zoomStepLabel = this.zoomLevels[startIdx].name;
@@ -1469,7 +1479,7 @@ export class App implements AfterViewInit, OnDestroy {
     const g = this.clamp(elapsed / totalMs, 0, 1);
 
     // Spaceship profile for BOTH stars and HUD path
-    const ship = this.accelCruiseDecel(g, 0.34, 0.34);
+    const ship = this.accelCruiseDecel(g, 0.36, 0.36);
 
     // Path info
     const unitsSeq: number[] = this._ZOOM_ANIM.unitsSeq!;
