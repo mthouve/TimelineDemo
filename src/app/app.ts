@@ -122,7 +122,7 @@ export class App implements AfterViewInit, OnDestroy {
   private lastScrollY = 0;
 
   private readonly EDGE_PAD = 32;
-  private readonly ONE_LEVEL_MS = 2500;
+  private readonly ONE_LEVEL_MS = 1660; // ~10s total across 6 steps
 
   // HUD canvas list
   private HUDS: Array<{
@@ -347,20 +347,6 @@ export class App implements AfterViewInit, OnDestroy {
       this.setZoomIndex(this.currentZoomIdx - 1);
     }
   };
-
-  // For driving the thumb visually during animation (no component API required)
-  private getZoomSliderEl(): HTMLInputElement | null {
-    return document.querySelector(
-      'app-zoom-control input[type="range"]'
-    ) as HTMLInputElement | null;
-  }
-  private setSliderVisualIndex(idx: number) {
-    const el = this.getZoomSliderEl();
-    if (!el) return;
-    el.value = String(idx);
-    el.setAttribute('aria-valuenow', el.value);
-    (el as any).style?.setProperty?.('--zoom-visual-index', String(idx));
-  }
 
   // ── Host listeners ────────────────────────────────────────────────────────────
   @HostListener('window:resize')
@@ -1424,10 +1410,7 @@ export class App implements AfterViewInit, OnDestroy {
     const totalDur = this.ONE_LEVEL_MS * steps;
 
     // Live caption during transition
-    this._zoomStepLabel = `${this.zoomLevels[startIdx].name} > ${this.zoomLevels[endIdx].name}`;
-
-    // Prime the slider to the start position (fractional allowed)
-    this.setSliderVisualIndex(startIdx);
+    this._zoomStepLabel = this.zoomLevels[startIdx].name;
 
     // Set document.title hint
     const oldTitle = document.title;
@@ -1486,7 +1469,7 @@ export class App implements AfterViewInit, OnDestroy {
     const g = this.clamp(elapsed / totalMs, 0, 1);
 
     // Spaceship profile for BOTH stars and HUD path
-    const ship = this.accelCruiseDecel(g, 0.18, 0.18);
+    const ship = this.accelCruiseDecel(g, 0.34, 0.34);
 
     // Path info
     const unitsSeq: number[] = this._ZOOM_ANIM.unitsSeq!;
@@ -1547,10 +1530,22 @@ export class App implements AfterViewInit, OnDestroy {
     const fadeTo = segT;
     const fadeFrom = 1 - fadeTo;
 
+    // Decide which level we’re effectively “at” this frame.
     // Visual slider position (fractional)
     const visualIndex = startIdx + dir * (i + segT);
     this._zoomVisualIndex = visualIndex;
-    this.setSliderVisualIndex(this._zoomVisualIndex); // glide the thumb
+    // (Keep the thumb parked: no need to call setSliderVisualIndex here)
+
+    // — Caption changes exactly at tick crossings —
+    const EPS = 1e-6;
+    // When zooming in (dir=+1), show the level at/behind the progress edge:
+    // stays "from" until the edge reaches the next tick, then flips.
+    const liveIdx =
+      dir > 0
+        ? Math.min(endIdx, Math.floor(visualIndex + EPS))
+        : Math.max(endIdx, Math.ceil(visualIndex - EPS));
+
+    this._zoomStepLabel = this.zoomLevels[liveIdx].name;
 
     // Draw frame
     this.redraw(fadeFrom, fadeTo);
@@ -1569,7 +1564,6 @@ export class App implements AfterViewInit, OnDestroy {
     this.currentZoomIdx = this._ZOOM_ANIM.targetIdx;
 
     // Snap final slider position & restore caption to the settled level
-    this.setSliderVisualIndex(this.currentZoomIdx);
     this._zoomStepLabel = ''; // template can show current level name
 
     this._ZOOM_ANIM.active = false;
