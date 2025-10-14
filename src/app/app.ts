@@ -1410,7 +1410,7 @@ export class App implements AfterViewInit, OnDestroy {
     const totalDur = this.ONE_LEVEL_MS * steps;
 
     // Live caption during transition
-    this._zoomStepLabel = `${this.zoomLevels[startIdx].name} > ${this.zoomLevels[endIdx].name}`;
+    this._zoomStepLabel = this.zoomLevels[startIdx].name;
 
     // Set document.title hint
     const oldTitle = document.title;
@@ -1530,9 +1530,22 @@ export class App implements AfterViewInit, OnDestroy {
     const fadeTo = segT;
     const fadeFrom = 1 - fadeTo;
 
+    // Decide which level we’re effectively “at” this frame.
     // Visual slider position (fractional)
     const visualIndex = startIdx + dir * (i + segT);
     this._zoomVisualIndex = visualIndex;
+    // (Keep the thumb parked: no need to call setSliderVisualIndex here)
+
+    // — Caption changes exactly at tick crossings —
+    const EPS = 1e-6;
+    // When zooming in (dir=+1), show the level at/behind the progress edge:
+    // stays "from" until the edge reaches the next tick, then flips.
+    const liveIdx =
+      dir > 0
+        ? Math.min(endIdx, Math.floor(visualIndex + EPS))
+        : Math.max(endIdx, Math.ceil(visualIndex - EPS));
+
+    this._zoomStepLabel = this.zoomLevels[liveIdx].name;
 
     // Draw frame
     this.redraw(fadeFrom, fadeTo);
