@@ -23,6 +23,22 @@ export interface DrawCenterlineParams {
   snapToUnit: (year: number, unit: number) => number;
 }
 
+export interface DrawHudLayerParams {
+  ctx: CanvasRenderingContext2D;
+  canvasWidth: number;
+  canvasHeight: number;
+  dpr: number;
+  screenWidth: number;
+  unitYears: number;
+  yearToY: (y: number) => number;
+  yToYearDev: (yDev: number) => number;
+  nowYearFraction: () => number;
+  formatLabelByUnit: (year: number, unit: number) => string;
+  labelFromDayOfYear: (year: number, dayOfYear: number) => string;
+  daysInYear: (year: number) => number;
+  getMonthName: (month: number) => string;
+}
+
 @Injectable({
   providedIn: 'root',
 })
@@ -68,6 +84,124 @@ export class TimelineHudService {
 
   getGridThickness(): number {
     return this.grid.thicknessCSS;
+  }
+
+  drawHudLayer(params: DrawHudLayerParams) {
+    const {
+      ctx,
+      canvasWidth: Wc,
+      canvasHeight: Hc,
+      dpr,
+      screenWidth,
+      unitYears: u,
+      yearToY,
+      yToYearDev,
+      nowYearFraction,
+      formatLabelByUnit,
+      labelFromDayOfYear,
+      daysInYear,
+    } = params;
+
+    ctx.clearRect(0, 0, Wc, Hc);
+
+    const thick = Math.max(1, Math.round(this.grid.thicknessCSS * dpr));
+    const segLen = Math.max(2, Math.round((screenWidth || Wc) * 0.1 * dpr));
+    const x0 = Math.round((Wc - segLen) / 2);
+
+    ctx.font = `${Math.max(
+      10,
+      Math.round(12 * dpr)
+    )}px system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell`;
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'right';
+    const labelMargin = Math.round(6 * dpr);
+
+    const yTopYear = yToYearDev(0);
+    const yBotYear = yToYearDev(Hc);
+
+    const isDayTier = u < 1 / 300; // Approximately less than a day
+    const isWeekTier = u >= 1 / 300 && u <= 1 / 50; // Approximately week-scale
+
+    const nextStepAtOrAbove = (y: number, step: number) =>
+      y >= 0 ? Math.ceil(y / step) * step : -Math.floor(Math.abs(y) / step) * step;
+
+    if (isDayTier && !isWeekTier) {
+      const step = 1 / 365;
+      let yTick = nextStepAtOrAbove(yTopYear - 1e-9, step);
+      const visibleYears = Math.max(0, yBotYear - yTopYear);
+      const maxTicks = Math.min(15000, Math.ceil(visibleYears / step) + 20);
+      let safety = 0;
+      while (yTick <= yBotYear + 1e-7 && safety++ < maxTicks) {
+        const yPx = yearToY(yTick);
+        ctx.fillStyle = this.grid.color;
+        ctx.fillRect(x0, Math.round(yPx - Math.floor(thick / 2)), segLen, thick);
+        const yr = yTick >= 0 ? Math.floor(yTick) : Math.ceil(yTick);
+        const diy = daysInYear(yr);
+        const label = formatLabelByUnit(yTick, 1 / diy);
+        if (label) {
+          ctx.fillStyle = 'rgba(255,170,80,0.95)';
+          ctx.fillText(label, x0 - labelMargin, Math.round(yPx));
+        }
+        yTick += step;
+      }
+    } else if (isWeekTier) {
+      const step = 7 / 365;
+      let yTick = nextStepAtOrAbove(yTopYear - 1e-9, step);
+      const visibleYears = Math.max(0, yBotYear - yTopYear);
+      const maxTicks = Math.min(6000, Math.ceil(visibleYears / step) + 20);
+      let safety = 0;
+      while (yTick <= yBotYear + 1e-7 && safety++ < maxTicks) {
+        const yPx = yearToY(yTick);
+        ctx.fillStyle = this.grid.color;
+        ctx.fillRect(x0, Math.round(yPx - Math.floor(thick / 2)), segLen, thick);
+
+        const yr = yTick >= 0 ? Math.floor(yTick) : Math.ceil(yTick);
+        const diy = daysInYear(yr);
+        const frac = yTick - (yTick >= 0 ? Math.floor(yTick) : Math.ceil(yTick));
+        let dayOfYear = Math.floor(frac * diy);
+        dayOfYear = dayOfYear - (dayOfYear % 7); // week start
+        const label = labelFromDayOfYear(yr, dayOfYear);
+        if (label) {
+          ctx.fillStyle = 'rgba(255,170,80,0.95)';
+          ctx.fillText(label, x0 - labelMargin, Math.round(yPx));
+        }
+        yTick += step;
+      }
+    } else {
+      let yTick = nextStepAtOrAbove(yTopYear - 1e-9, u);
+      let safety = 0;
+      while (yTick <= yBotYear + 1e-7 && safety++ < 4000) {
+        const yPx = yearToY(yTick);
+        ctx.fillStyle = this.grid.color;
+        ctx.fillRect(x0, Math.round(yPx - Math.floor(thick / 2)), segLen, thick);
+
+        const label = formatLabelByUnit(yTick, u);
+        ctx.fillStyle = 'rgba(255,170,80,0.95)';
+        if (label) ctx.fillText(label, x0 - labelMargin, Math.round(yPx));
+
+        yTick += u;
+      }
+    }
+
+    // Today marker
+    const yToday = Math.round(yearToY(nowYearFraction()));
+    if (yToday >= -4 && yToday <= Hc + 4) {
+      const ySeg = yToday - Math.floor(thick / 2);
+      ctx.save();
+      ctx.fillStyle = 'rgba(255,70,70,0.9)';
+      ctx.fillRect(x0, ySeg, segLen, thick);
+
+      // Today's date label
+      const d = new Date();
+      const todayLabel = `${params.getMonthName(
+        d.getUTCMonth()
+      )} ${d.getUTCDate()}, ${d.getUTCFullYear()} C.E.`;
+      ctx.textAlign = 'right';
+      ctx.fillStyle = 'rgba(255,70,70,0.95)';
+      ctx.fillText(todayLabel, x0 - labelMargin, Math.round(yToday));
+
+      ctx.restore();
+    }
   }
 
   drawCenterline(params: DrawCenterlineParams) {
