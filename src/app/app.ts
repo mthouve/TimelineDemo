@@ -50,7 +50,7 @@ type ZoomAnim = {
 })
 export class App implements AfterViewInit, OnDestroy {
   constructor(
-    private starRender: StarfieldRendererService, 
+    private starRender: StarfieldRendererService,
     private dateService: TimelineDateService,
     private r2: Renderer2
   ) {
@@ -556,127 +556,21 @@ export class App implements AfterViewInit, OnDestroy {
     return v < a ? a : v > b ? b : v;
   }
   private isLeapYear(y: number) {
-    const a = Math.abs(y);
-    return a % 4 === 0 && (a % 100 !== 0 || a % 400 === 0);
+    return this.dateService.isLeapYear(y);
   }
   private daysInYear(y: number) {
-    return this.isLeapYear(y) ? 366 : 365;
+    return this.dateService.daysInYear(y);
   }
   private startOfYearInt(yf: number) {
-    return yf >= 0 ? Math.floor(yf) : Math.ceil(yf);
+    return this.dateService.startOfYearInt(yf);
   }
 
   private yearParseWithFlag(input: string | number): { yf: number; yearOnly: boolean } {
-    if (typeof input === 'number' && isFinite(input)) {
-      return { yf: input, yearOnly: Math.floor(input) === input };
-    }
-    if (typeof input !== 'string') return { yf: NaN, yearOnly: false };
-
-    const raw = input.normalize ? input.normalize('NFKC').trim() : String(input).trim();
-    const U = raw.toUpperCase();
-    const months = [
-      'JAN',
-      'FEB',
-      'MAR',
-      'APR',
-      'MAY',
-      'JUN',
-      'JUL',
-      'AUG',
-      'SEP',
-      'SEPT',
-      'OCT',
-      'NOV',
-      'DEC',
-    ];
-
-    let hasMonth = false;
-    if (U) {
-      const p0 = U.split(',').join(' ').split(' ').filter(Boolean);
-      if (p0.length) {
-        const t0 = p0[0];
-        for (const m of months) {
-          if (t0.indexOf(m) === 0) {
-            hasMonth = true;
-            break;
-          }
-        }
-      }
-    }
-
-    const yf = this.yearFractionFromInput(raw);
-    const yearOnly = !hasMonth && isFinite(yf) && Math.floor(Math.abs(yf)) === Math.abs(yf);
-    return { yf, yearOnly };
+    return this.dateService.yearParseWithFlag(input);
   }
 
   private yearFractionFromInput(input: string | number): number {
-    if (typeof input === 'number' && isFinite(input)) return input;
-    if (typeof input !== 'string') return NaN;
-
-    const raw = input.normalize ? input.normalize('NFKC').trim() : String(input).trim();
-    const U = raw.toUpperCase();
-    const hasBCE =
-      U.includes('BCE') ||
-      U.includes('B.C.E') ||
-      U.endsWith(' BC') ||
-      /BC\s*$/i.test(U) ||
-      U.includes('B.C.');
-
-    const lastInt = (str: string) => {
-      let num: number | null = null,
-        cur = '';
-      for (const c of str) {
-        if (c >= '0' && c <= '9') cur += c;
-        else if (cur) {
-          num = parseInt(cur, 10);
-          cur = '';
-        }
-      }
-      if (cur) num = parseInt(cur, 10);
-      return num === null ? NaN : num;
-    };
-
-    const months = [
-      'JAN',
-      'FEB',
-      'MAR',
-      'APR',
-      'MAY',
-      'JUN',
-      'JUL',
-      'AUG',
-      'SEP',
-      'SEPT',
-      'OCT',
-      'NOV',
-      'DEC',
-    ];
-    const mdays = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    const parts = raw.split(',').join(' ').split(' ').filter(Boolean);
-    let mi = -1;
-    if (parts.length) {
-      const t0 = parts[0].toUpperCase();
-      for (let j = 0; j < months.length; j++)
-        if (t0.indexOf(months[j]) === 0) {
-          mi = j % 12;
-          break;
-        }
-    }
-
-    if (mi >= 0 && parts.length >= 2) {
-      const day = parseInt(parts[1], 10);
-      const yAbs = lastInt(raw);
-      if (!isNaN(day) && !isNaN(yAbs)) {
-        let doy = day;
-        for (let k = 0; k < mi; k++) doy += mdays[k];
-        const frac = this.clamp((doy - 1) / 365, 0, 0.999999);
-        return hasBCE ? -Math.abs(yAbs) + frac : yAbs + frac;
-      }
-    }
-
-    const yOnly = lastInt(raw);
-    if (!isNaN(yOnly)) return hasBCE ? -Math.abs(yOnly) : yOnly;
-    return NaN;
+    return this.dateService.yearFractionFromInput(input);
   }
 
   private getEntries() {
@@ -691,11 +585,7 @@ export class App implements AfterViewInit, OnDestroy {
   }
 
   private nowYearFraction() {
-    const d = new Date();
-    const y = d.getUTCFullYear();
-    const a = Date.UTC(y, 0, 1),
-      b = Date.UTC(y + 1, 0, 1);
-    return y + (d.getTime() - a) / (b - a);
+    return this.dateService.nowYearFraction();
   }
 
   // ── Grid & mapping ────────────────────────────────────────────────────────────
@@ -724,8 +614,7 @@ export class App implements AfterViewInit, OnDestroy {
     return this.TL.baseYear + (yDev - this.baselineYDev()) / this.ppy();
   }
   private snapToUnit(yf: number, unit: number) {
-    if (!unit) return yf;
-    return yf >= 0 ? Math.floor(yf / unit) * unit : -Math.ceil(Math.abs(yf) / unit) * unit;
+    return this.dateService.snapToUnit(yf, unit);
   }
   private reanchorGridForCenter(yf: number) {
     const sY = (window.scrollY || window.pageYOffset || 0) - this.SCROLL_SHIFT;
@@ -913,35 +802,7 @@ export class App implements AfterViewInit, OnDestroy {
   }
 
   private labelFromDayOfYear(year: number, dayOfYear0: number): string {
-    const md = [31, this.isLeapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    const months2 = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
-    ];
-    let mi = 0,
-      dleft = dayOfYear0;
-    while (mi < 12 && dleft >= md[mi]) {
-      dleft -= md[mi];
-      mi++;
-    }
-    if (mi > 11) {
-      mi = 11;
-      dleft = md[11] - 1;
-    }
-    const day = dleft + 1;
-    const yr = year < 0 ? -year : year;
-    const tail = year < 0 ? ' B.C.E.' : ' C.E.';
-    return `${months2[mi]} ${day}, ${yr}${tail}`;
+    return this.dateService.labelFromDayOfYear(year, dayOfYear0);
   }
 
   private drawHuds(fadeFrom = 1, fadeTo = 0) {
@@ -982,103 +843,7 @@ export class App implements AfterViewInit, OnDestroy {
   }
 
   private formatLabelByUnit(yf: number, unit: number) {
-    const isBCE = yf < 0;
-    let abs = isBCE ? -yf : yf;
-    let yInt = Math.floor(abs);
-    let frac = abs - yInt;
-    const calYear = yf >= 0 ? Math.floor(yf) : Math.ceil(yf);
-    let diy = this.daysInYear(calYear);
-
-    // ── DAY tier detection (robust) ──
-    // Accept exact 1/diy, exact 1/365, or near 1/365.2425 (Gregorian mean) with tolerance.
-    const isDayTier =
-      Math.abs(unit - 1 / diy) < 1e-7 ||
-      Math.abs(unit - 1 / 365) < 1e-7 ||
-      this.dateService.isApproximatelyEqual(unit, 1 / this.dateService.meanYear, 0.02);
-
-    if (isDayTier) {
-      // Convert fractional year → Month/Day using the real days-in-year for the snapped year.
-      let dayOfYear = Math.round(frac * diy);
-      if (dayOfYear === diy) {
-        dayOfYear = 0;
-        yInt += 1;
-        diy = this.daysInYear(calYear + 1);
-      }
-      const md = [31, this.isLeapYear(calYear) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-      const months2 = [
-        'Jan',
-        'Feb',
-        'Mar',
-        'Apr',
-        'May',
-        'Jun',
-        'Jul',
-        'Aug',
-        'Sep',
-        'Oct',
-        'Nov',
-        'Dec',
-      ];
-      let mi = 0,
-        dleft = dayOfYear;
-      while (mi < 12) {
-        if (dleft < md[mi]) break;
-        dleft -= md[mi];
-        mi++;
-      }
-      if (mi > 11) {
-        mi = 11;
-        dleft = md[11] - 1;
-      }
-      const day = dleft + 1;
-      let yr3 = isBCE ? -yInt : yInt;
-      const tail2 = yr3 < 0 ? ' B.C.E.' : ' C.E.';
-      if (yr3 < 0) yr3 = -yr3;
-      return `${months2[mi]} ${day}, ${yr3}${tail2}`;
-    }
-
-    // ── WEEK (approx) ──
-    if (this.dateService.isApproximatelyEqual(unit, 7 / this.dateService.meanYear, 0.02)) {
-      const year = calYear;
-      const diyL = this.daysInYear(year);
-      let dayOfYear = Math.floor(frac * diyL);
-      dayOfYear = dayOfYear - (dayOfYear % 7); // start of week
-      return this.labelFromDayOfYear(year, dayOfYear);
-    }
-
-    // ── MONTH ──
-    if (Math.abs(unit - 1 / 12) < 1e-7) {
-      let m = Math.round(frac * 12);
-      if (m === 12) {
-        m = 0;
-        yInt += 1;
-      }
-      const months = [
-        'Jan',
-        'Feb',
-        'Mar',
-        'Apr',
-        'May',
-        'Jun',
-        'Jul',
-        'Aug',
-        'Sep',
-        'Oct',
-        'Nov',
-        'Dec',
-      ];
-      let yr2 = isBCE ? -yInt : yInt;
-      const tail = yr2 < 0 ? ' B.C.E.' : ' C.E.';
-      if (yr2 < 0) yr2 = -yr2;
-      return `${months[m]} ${yr2}${tail}`;
-    }
-
-    // ── YEAR+ ──
-    if (unit >= 1) {
-      const yr = isBCE ? -Math.round(abs) : Math.round(abs);
-      return yr < 0 ? `${-yr} B.C.E.` : `${yr} C.E.`;
-    }
-    return '';
+    return this.dateService.formatLabelByUnit(yf, unit);
   }
 
   private drawCenterline() {
