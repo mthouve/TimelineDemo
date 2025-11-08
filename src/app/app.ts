@@ -9,6 +9,7 @@ import {
 } from '@angular/core';
 import { StarfieldRendererService } from './services/starfield-renderer.service';
 import { TimelineDateService, ZoomSpec } from './services/timeline-date.service';
+import { TimelineHudService } from './services/timeline-hud.service';
 import { ZoomControlComponent } from './zoom-control/zoom-control.component';
 
 // Animation envelope (typed)
@@ -52,24 +53,12 @@ export class App implements AfterViewInit, OnDestroy {
   constructor(
     private starRender: StarfieldRendererService,
     private dateService: TimelineDateService,
+    private hudService: TimelineHudService,
     private r2: Renderer2
   ) {
     this.zoomLevels = this.dateService.getZoomLevels();
     this.zoomLabels = this.dateService.getZoomLabels();
     this.TIMELINE_POINTS = this.dateService.getTimelinePoints();
-  }
-
-  // ── Debug ─────────────────────────────────────────────────────────────────────
-  private DEBUG_ZOOM = true;
-  private _dbgLast = 0;
-  private dbg(...args: any[]) {
-    if (!this.DEBUG_ZOOM) return;
-    const now = (performance && performance.now ? performance.now() : Date.now()) as number;
-    if (now - this._dbgLast > 100) {
-      // eslint-disable-next-line no-console
-      console.log('[zoom]', ...args);
-      this._dbgLast = now;
-    }
   }
 
   private markActiveHudLayers() {
@@ -458,6 +447,9 @@ export class App implements AfterViewInit, OnDestroy {
     const before = this.centerline?.nativeElement as HTMLCanvasElement | null;
     const parent = (before?.parentNode ?? null) as (Node & ParentNode) | null;
 
+    this.hudService.clearHuds(); // Clear service layers
+    this.HUDS = []; // Clear local array
+
     for (const spec of this.zoomLevels) {
       let el = document.getElementById(spec.id) as HTMLCanvasElement | null;
       if (!el) {
@@ -470,7 +462,9 @@ export class App implements AfterViewInit, OnDestroy {
       }
       el.classList.add('hud-hidden', 'no-anim');
       const ctx = el.getContext('2d', { alpha: true }) as CanvasRenderingContext2D;
-      this.HUDS.push({ el, ctx, unit: spec.unit, id: spec.id });
+      const hudLayer = { el, ctx, unit: spec.unit, id: spec.id };
+      this.HUDS.push(hudLayer);
+      this.hudService.addHudLayer(hudLayer);
     }
   }
   private viewportW() {
@@ -812,15 +806,6 @@ export class App implements AfterViewInit, OnDestroy {
 
       const fromUnit = this._ZOOM_ANIM.hudStartUnit ?? this._ZOOM_ANIM.startUnit;
       const toUnit = this._ZOOM_ANIM.hudEndUnit ?? this._ZOOM_ANIM.endUnit;
-
-      this.dbg('drawHuds(active)', {
-        fromIdx: this.animFromIdx,
-        toIdx: this.animToIdx,
-        fromUnit,
-        toUnit,
-        fadeFrom: +fadeFrom.toFixed(2),
-        fadeTo: +fadeTo.toFixed(2),
-      });
 
       from.ctx.clearRect(0, 0, this.W, this.H);
       to.ctx.clearRect(0, 0, this.W, this.H);
