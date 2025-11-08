@@ -8,9 +8,8 @@ import {
   Renderer2,
 } from '@angular/core';
 import { StarfieldRendererService } from './services/starfield-renderer.service';
+import { TimelineDateService, ZoomSpec } from './services/timeline-date.service';
 import { ZoomControlComponent } from './zoom-control/zoom-control.component';
-
-type ZoomSpec = { id: string; name: string; unit: number };
 
 // Animation envelope (typed)
 type ZoomAnim = {
@@ -50,7 +49,15 @@ type ZoomAnim = {
   imports: [ZoomControlComponent],
 })
 export class App implements AfterViewInit, OnDestroy {
-  constructor(private starRender: StarfieldRendererService, private r2: Renderer2) {}
+  constructor(
+    private starRender: StarfieldRendererService, 
+    private dateService: TimelineDateService,
+    private r2: Renderer2
+  ) {
+    this.zoomLevels = this.dateService.getZoomLevels();
+    this.zoomLabels = this.dateService.getZoomLabels();
+    this.TIMELINE_POINTS = this.dateService.getTimelinePoints();
+  }
 
   // ── Debug ─────────────────────────────────────────────────────────────────────
   private DEBUG_ZOOM = true;
@@ -82,17 +89,8 @@ export class App implements AfterViewInit, OnDestroy {
   @ViewChild(ZoomControlComponent) zoomUi?: ZoomControlComponent;
 
   // ── Zoom tiers ────────────────────────────────────────────────────────────────
-  private readonly MEAN_YEAR = 365.2425; // Gregorian mean
-  zoomLevels: ZoomSpec[] = [
-    { id: 'guidesDay', name: 'Day', unit: 1 / this.MEAN_YEAR },
-    { id: 'guidesWeek', name: 'Week', unit: 7 / this.MEAN_YEAR },
-    { id: 'guidesMonth', name: 'Month', unit: 1 / 12 },
-    { id: 'guidesYear', name: 'Year', unit: 1 },
-    { id: 'guidesDecade', name: 'Decade', unit: 10 },
-    { id: 'guidesCentury', name: 'Century', unit: 100 },
-    { id: 'guidesMilennium', name: 'Milennium', unit: 1000 },
-  ];
-  zoomLabels: string[] = this.zoomLevels.map((z) => z.name);
+  zoomLevels: ZoomSpec[] = [];
+  zoomLabels: string[] = [];
   currentZoomIdx = 3; // Year
 
   // Match #levels length
@@ -137,22 +135,7 @@ export class App implements AfterViewInit, OnDestroy {
   }> = [];
 
   // ── Data ──────────────────────────────────────────────────────────────────────
-  private TIMELINE_POINTS: Record<string, string> = {
-    'January 1, 150 B.C.E.': 'January 1, 150 B.C.E.',
-    '0 C.E.': '0 C.E.',
-    '1 C.E.': '1 C.E.',
-    '10 C.E.': '10 C.E.',
-    '100 C.E.': '100 C.E.',
-    'February 27, 501 C.E.': 'February 27, 501 C.E.',
-    'February 28, 501 C.E.': 'February 28, 501 C.E.',
-    'February 28, 2024 C.E.': 'February 28, 2024 C.E.',
-    'February 29, 2024 C.E.': 'February 29, 2024 C.E.',
-    '1000 C.E.': '1000 C.E.',
-    '2000 C.E.': '2000 C.E.',
-    'June 1, 2025 C.E.': 'June 1, 2025 C.E.',
-    'September 30, 2025 C.E.': 'September 30, 2025 C.E.',
-    '2050 C.E.': '2050 C.E.',
-  };
+  private TIMELINE_POINTS: Record<string, string>;
 
   // ── Sizing ────────────────────────────────────────────────────────────────────
   private dpr = Math.max(1, window.devicePixelRatio || 1);
@@ -832,12 +815,8 @@ export class App implements AfterViewInit, OnDestroy {
     const yTopYear = this.yToYearDev(0);
     const yBotYear = this.yToYearDev(Hc);
 
-    const rel = (a: number, b: number) => Math.abs(a - b) / Math.max(1e-9, Math.abs(b));
-    const isDayTier =
-      Math.abs(u - 1 / 365) < 1e-6 ||
-      Math.abs(u - 1 / 366) < 1e-6 ||
-      rel(u, 1 / this.MEAN_YEAR) < 0.01;
-    const isWeekTier = rel(u, 7 / this.MEAN_YEAR) < 0.02;
+    const isDayTier = this.dateService.isDayUnit(u);
+    const isWeekTier = this.dateService.isWeekUnit(u);
 
     const nextStepAtOrAbove = (y: number, step: number) =>
       y >= 0 ? Math.ceil(y / step) * step : -Math.floor(Math.abs(y) / step) * step;
@@ -1010,14 +989,12 @@ export class App implements AfterViewInit, OnDestroy {
     const calYear = yf >= 0 ? Math.floor(yf) : Math.ceil(yf);
     let diy = this.daysInYear(calYear);
 
-    const rel = (a: number, b: number) => Math.abs(a - b) / Math.max(1e-9, Math.abs(b));
-
     // ── DAY tier detection (robust) ──
     // Accept exact 1/diy, exact 1/365, or near 1/365.2425 (Gregorian mean) with tolerance.
     const isDayTier =
       Math.abs(unit - 1 / diy) < 1e-7 ||
       Math.abs(unit - 1 / 365) < 1e-7 ||
-      rel(unit, 1 / this.MEAN_YEAR) < 0.02;
+      this.dateService.isApproximatelyEqual(unit, 1 / this.dateService.meanYear, 0.02);
 
     if (isDayTier) {
       // Convert fractional year → Month/Day using the real days-in-year for the snapped year.
@@ -1061,7 +1038,7 @@ export class App implements AfterViewInit, OnDestroy {
     }
 
     // ── WEEK (approx) ──
-    if (rel(unit, 7 / this.MEAN_YEAR) < 0.02) {
+    if (this.dateService.isApproximatelyEqual(unit, 7 / this.dateService.meanYear, 0.02)) {
       const year = calYear;
       const diyL = this.daysInYear(year);
       let dayOfYear = Math.floor(frac * diyL);
