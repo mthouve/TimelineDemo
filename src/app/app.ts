@@ -832,45 +832,22 @@ export class App implements AfterViewInit, OnDestroy {
   }
 
   private drawCenterline() {
-    const ccv = this.centerline.nativeElement;
-    const clx = ccv.getContext('2d')!;
-    clx.clearRect(0, 0, this.CW, this.CH);
-
-    const y = Math.round(this.CH / 2);
-    const unit = this.HUDS[this.currentZoomIdx]?.unit ?? 1;
-
-    const yfCenter = this.yToYearDev(this.CH / 2);
-    let snapped = this.snapToUnit(yfCenter, unit);
-
-    const s = window.scrollY || window.pageYOffset || 0;
-    if (this.SCROLL_MIN != null && this.SCROLL_MAX != null) {
-      const es = this.getEntries();
-      if (es.length) {
-        const THRESH = 1;
-        if (s <= this.SCROLL_MIN + THRESH) snapped = this.snapToUnit(es[0].yf, unit);
-        else if (s >= this.SCROLL_MAX - THRESH)
-          snapped = this.snapToUnit(es[es.length - 1].yf, unit);
-      }
-    }
-
-    const label = this.formatLabelByUnit(snapped, unit);
-    const thick = Math.max(1, Math.round(this.GRID.thicknessCSS * this.DPR));
-    const segLen = Math.max(2, Math.round((window.innerWidth || this.TW) * 0.1 * this.DPR));
-    const x0 = Math.round((this.CW - segLen) / 2);
-    const labelMargin = Math.round(6 * this.DPR);
-
-    clx.save();
-    clx.fillStyle = 'rgba(200,200,210,0.65)';
-    clx.fillRect(x0, y - Math.floor(thick / 2), segLen, thick);
-    clx.font = `${Math.max(
-      10,
-      Math.round(12 * this.DPR)
-    )}px system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell`;
-    clx.textAlign = 'right';
-    clx.textBaseline = 'middle';
-    clx.fillStyle = 'rgba(200,200,210,0.9)';
-    clx.fillText(label, x0 - labelMargin, y);
-    clx.restore();
+    const canvas = this.centerline.nativeElement;
+    this.hudService.drawCenterline({
+      canvas,
+      canvasWidth: this.CW,
+      canvasHeight: this.CH,
+      dpr: this.DPR,
+      screenWidth: window.innerWidth,
+      currentZoomIdx: this.currentZoomIdx,
+      scrollY: window.scrollY || window.pageYOffset || 0,
+      scrollMin: this.SCROLL_MIN,
+      scrollMax: this.SCROLL_MAX,
+      entries: this.getEntries(),
+      yearToY: this.yToYearDev.bind(this),
+      formatLabel: this.formatLabelByUnit.bind(this),
+      snapToUnit: this.snapToUnit.bind(this),
+    });
   }
 
   private centerFirstPoint() {
