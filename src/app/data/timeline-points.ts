@@ -1,0 +1,16 @@
+export const TIMELINE_POINTS: Record<string, string> = {
+  'January 1, 150 B.C.E.': 'January 1, 150 B.C.E.',
+  '0 C.E.': '0 C.E.',
+  '1 C.E.': '1 C.E.',
+  '10 C.E.': '10 C.E.',
+  '100 C.E.': '100 C.E.',
+  'February 27, 501 C.E.': 'February 27, 501 C.E.',
+  'February 28, 501 C.E.': 'February 28, 501 C.E.',
+  'February 28, 2024 C.E.': 'February 28, 2024 C.E.',
+  'February 29, 2024 C.E.': 'February 29, 2024 C.E.',
+  '1000 C.E.': '1000 C.E.',
+  '2000 C.E.': '2000 C.E.',
+  'June 1, 2025 C.E.': 'June 1, 2025 C.E.',
+  'September 30, 2025 C.E.': 'September 30, 2025 C.E.',
+  '2050 C.E.': '2050 C.E.',
+};
