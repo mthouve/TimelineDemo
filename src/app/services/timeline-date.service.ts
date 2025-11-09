@@ -130,10 +130,11 @@ export class TimelineDateService {
     let mi = -1;
     if (parts.length) {
       const t0 = parts[0].toUpperCase();
-      for (let j = 0; j < months.length; j++) if (t0.indexOf(months[j]) === 0) {
-        mi = j % 12;
-        break;
-      }
+      for (let j = 0; j < months.length; j++)
+        if (t0.indexOf(months[j]) === 0) {
+          mi = j % 12;
+          break;
+        }
     }
 
     if (mi >= 0 && parts.length >= 2) {
@@ -340,5 +341,4 @@ export class TimelineDateService {
   private clamp(v: number, a: number, b: number) {
     return v < a ? a : v > b ? b : v;
   }
-
 }
