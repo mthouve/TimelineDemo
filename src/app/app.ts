@@ -12,6 +12,8 @@ import { TimelineDateService, ZoomSpec } from './services/timeline-date.service'
 import { TimelineHudService } from './services/timeline-hud.service';
 import { ZoomControlComponent } from './zoom-control/zoom-control.component';
 import { SettingsControlComponent } from './settings-control/settings-control.component';
+import { InfoBoxComponent, InfoBoxEntry } from './info-box/info-box.component';
+import { CommonModule } from '@angular/common';
 
 // Animation envelope (typed)
 type ZoomAnim = {
@@ -48,7 +50,7 @@ type ZoomAnim = {
   standalone: true,
   templateUrl: './app.html',
   styleUrl: './app.scss',
-  imports: [ZoomControlComponent, SettingsControlComponent],
+  imports: [ZoomControlComponent, SettingsControlComponent, InfoBoxComponent, CommonModule],
 })
 export class App implements AfterViewInit, OnDestroy {
   constructor(
@@ -60,6 +62,42 @@ export class App implements AfterViewInit, OnDestroy {
     this.zoomLevels = this.dateService.getZoomLevels();
     this.zoomLabels = this.dateService.getZoomLabels();
     this.TIMELINE_POINTS = this.dateService.getTimelinePoints();
+  }
+
+  // ── Info box state ──────────────────────────────────────────────────────────
+  infoEntries: InfoBoxEntry[] = [];
+  infoBoxHidden = true;
+
+  private updateInfoBox() {
+    const entries = this.getEntries();
+    if (!entries.length || !this.CH || !this.GRID.spacingCSS || !this.TL.unitYears) {
+      this.infoEntries = [];
+      this.infoBoxHidden = true;
+      return;
+    }
+
+    const centerYF = this.centerYF ?? this.yToYearDev(this.CH / 2);
+    
+    // One HUD spacing represents this.TL.unitYears (e.g., 1 year in Year view, 10 in Decade view)
+    // Primary: within ~1 HUD line spacing (in years)
+    // Secondary: within ~2 HUD line spacings (in years)
+    const primaryRange = this.TL.unitYears * 1.0; // within 1 HUD spacing
+    const secondaryRange = this.TL.unitYears * 2.0; // within 2 HUD spacings
+
+    const nearbyEntries: InfoBoxEntry[] = [];
+    for (const e of entries) {
+      const dy = Math.abs(e.yf - centerYF);
+      if (dy <= secondaryRange) {
+        nearbyEntries.push({
+          ...e,
+          isPrimary: dy <= primaryRange
+        });
+      }
+    }
+    
+    // Already in chronological order, just limit total count
+    this.infoEntries = nearbyEntries.slice(0, 16);
+    this.infoBoxHidden = this.infoEntries.length === 0;
   }
 
   private markActiveHudLayers() {
@@ -242,6 +280,7 @@ export class App implements AfterViewInit, OnDestroy {
       h.el.classList.remove('hud-visible');
     }
     this.redraw();
+    setTimeout(() => this.updateInfoBox(), 0);
     setTimeout(() => {
       const el = this.HUDS[this.currentZoomIdx]?.el;
       if (el) {
@@ -440,6 +479,7 @@ export class App implements AfterViewInit, OnDestroy {
     }
 
     this.redraw();
+    setTimeout(() => this.updateInfoBox(), 0);
     this.recenterVirtualWindowIfNeeded();
   }
 
