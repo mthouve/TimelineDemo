@@ -1,4 +1,4 @@
-import { Component, Input, Signal, signal, OnInit } from '@angular/core';
+import { Component, Input, Signal, signal, OnInit, ElementRef, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { BibleService } from '../services/bible.service';
@@ -18,6 +18,9 @@ import {
   imports: [CommonModule, FormsModule],
 })
 export class BibleViewerComponent implements OnInit {
+  @ViewChild('bibleContent', { read: ElementRef }) bibleContentEl?: ElementRef<HTMLElement>;
+  @ViewChild('searchResultsContainer', { read: ElementRef }) searchResultsEl?: ElementRef<HTMLElement>;
+
   books = signal<BibleBook[]>([]);
   selectedBook = signal<BibleBook | null>(null);
   selectedChapter = signal<number | null>(null);
@@ -97,5 +100,19 @@ export class BibleViewerComponent implements OnInit {
 
   formatReference(ref: BibleReference) {
     return this.bibleService.formatReference(ref);
+  }
+
+  onWheel(event: WheelEvent, element: HTMLElement) {
+    // Prevent scroll from bubbling to document when at scroll boundaries
+    const atTop = element.scrollTop === 0;
+    const atBottom = element.scrollTop + element.clientHeight >= element.scrollHeight;
+
+    if ((atTop && event.deltaY < 0) || (atBottom && event.deltaY > 0)) {
+      event.preventDefault();
+      return;
+    }
+
+    // Stop propagation to prevent timeline from scrolling
+    event.stopPropagation();
   }
 }

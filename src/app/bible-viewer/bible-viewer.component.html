@@ -17,7 +17,12 @@
     <button (click)="clearSearch()" *ngIf="searchQueryText">Clear</button>
   </div>
 
-  <div class="bible-content" *ngIf="!searchQueryText || searchResults().length === 0">
+  <div
+    class="bible-content"
+    *ngIf="!searchQueryText || searchResults().length === 0"
+    #bibleContent
+    (wheel)="onWheel($event, bibleContent)"
+  >
     <div *ngFor="let verse of verses()" class="bible-verse">
       <span class="ref"
         >{{ selectedBook()?.abbreviation }} {{ selectedChapter() }}:{{ verse.verse }}</span
@@ -26,7 +31,12 @@
     </div>
   </div>
 
-  <div class="bible-search-results" *ngIf="searchResults().length > 0">
+  <div
+    class="bible-search-results"
+    *ngIf="searchResults().length > 0"
+    #searchResultsContainer
+    (wheel)="onWheel($event, searchResultsContainer)"
+  >
     <div
       *ngFor="let result of searchResults()"
       class="search-result"
