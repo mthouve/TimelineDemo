@@ -1,0 +1,16 @@
+export const TIMELINE_POINTS: Record<string, string> = {
+  'January 1, 150 B.C.E.': 'Something happened on this date.',
+  '1 B.C.E.': 'A very important event happened this year.',
+  '1 C.E.': 'This was the beginning of the Common Era.',
+  '10 C.E.': 'Did you know? Something interesting happened in 10 C.E.',
+  '100 C.E.': 'Wait until you hear about what happened in 100 C.E.!',
+  'February 27, 501 C.E.': 'Believe it or not, something happened on this day.',
+  'February 28, 501 C.E.': 'Another event occurred on this date.',
+  'February 28, 2024 C.E.': 'A truly remarkable event took place on this day.',
+  'February 29, 2024 C.E.': 'Discover the significance of this leap day event!',
+  '1000 C.E.': 'What a millennium! Something noteworthy happened this year.',
+  '2000 C.E.': 'Tragic events unfolded in this year.',
+  'June 1, 2025 C.E.': 'On this day, something extraordinary occurred.',
+  'September 30, 2025 C.E.': 'This is when something memorable happened.',
+  '2050 C.E.': 'In the future, something incredible is set to happen this year.',
+};

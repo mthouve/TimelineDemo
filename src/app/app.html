@@ -10,16 +10,18 @@
 <!-- Scroller to provide vertical space (height set in TS) -->
 <main class="demo"></main>
 
-<!-- Zoom UI -->
-<app-zoom-control
-  [min]="0"
-  [max]="zoomLevels.length - 1"
-  [labels]="zoomLabels"
-  [value]="currentZoomIdx"
-  [captionOverride]="zoomStepLabel || null"
-  [bridgeStart]="ZOOM_ANIM.active ? zoomVisualIndex : null"
-  [bridgeEnd]="ZOOM_ANIM.active ? ZOOM_ANIM.targetIdx : null"
-  [disabled]="scrollLocked || ZOOM_ANIM.active"
-  (inputValue)="onZoomInput($event)"
-  (valueChange)="onZoomChange($event)"
-/>
+<!-- Settings UI (contains zoom slider) -->
+<app-settings-control>
+  <app-zoom-control
+    [min]="0"
+    [max]="zoomLevels.length - 1"
+    [labels]="zoomLabels"
+    [value]="currentZoomIdx"
+    [captionOverride]="zoomStepLabel || null"
+    [bridgeStart]="ZOOM_ANIM.active ? zoomVisualIndex : null"
+    [bridgeEnd]="ZOOM_ANIM.active ? ZOOM_ANIM.targetIdx : null"
+    [disabled]="scrollLocked || ZOOM_ANIM.active"
+    (inputValue)="onZoomInput($event)"
+    (valueChange)="onZoomChange($event)"
+  />
+</app-settings-control>
