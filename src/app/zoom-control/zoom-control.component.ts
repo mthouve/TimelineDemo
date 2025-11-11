@@ -54,9 +54,10 @@ import { CommonModule } from '@angular/common';
         display: contents;
         --trackH: 6px; /* bar height */
         --thumb: 16px; /* thumb diameter */
+        --sliderH: 36px; /* input slider hit area height */
         --padX: 12px; /* inner padding so bar isn’t edge-to-edge */
         --tickW: 2px; /* tick width */
-        --thumbOffsetY: -3px; /* fine-tune vertical nudge (up = negative) */
+        --thumbOffsetY: 0px; /* fine-tune vertical nudge (up = negative) */
       }
 
       .zoomUI {
@@ -78,7 +79,7 @@ import { CommonModule } from '@angular/common';
       .sliderWrap {
         position: relative;
         width: 240px;
-        height: 30px;
+        height: var(--sliderH); /* larger click area */
       }
       .inner {
         position: absolute;
@@ -145,7 +146,7 @@ import { CommonModule } from '@angular/common';
         right: calc(var(--padX) - 0.5 * var(--thumb));
         top: 50%;
         transform: translateY(-50%);
-        height: var(--trackH);
+        height: var(--sliderH); /* increase hit target height */
         z-index: 4;
 
         appearance: none;
@@ -157,11 +158,11 @@ import { CommonModule } from '@angular/common';
         padding: 0;
       }
       .slider::-webkit-slider-runnable-track {
-        height: 0;
+        height: 100%; /* ensure full-area clicks */
         background: transparent;
       }
       .slider::-moz-range-track {
-        height: 0;
+        height: 100%; /* ensure full-area clicks */
         background: transparent;
       }
 
@@ -170,8 +171,8 @@ import { CommonModule } from '@angular/common';
         appearance: none;
         width: var(--thumb);
         height: var(--thumb);
-        /* center over the track + fine nudge */
-        margin-top: calc((var(--trackH) - var(--thumb)) / 2 + var(--thumbOffsetY));
+        /* center within the slider input height (keeps aligned to visible track at 50%) */
+        margin-top: calc((var(--sliderH) - var(--thumb)) / 2 + var(--thumbOffsetY));
         border-radius: 50%;
         background: rgba(255, 150, 60, 0.95);
         box-shadow: 0 0 10px rgba(255, 150, 60, 0.7);
@@ -181,6 +182,8 @@ import { CommonModule } from '@angular/common';
       .slider::-moz-range-thumb {
         width: var(--thumb);
         height: var(--thumb);
+        /* center within the slider input height (keeps aligned to visible track at 50%) */
+        margin-top: calc((var(--sliderH) - var(--thumb)) / 2 + var(--thumbOffsetY));
         border-radius: 50%;
         background: rgba(255, 150, 60, 0.95);
         box-shadow: 0 0 10px rgba(255, 150, 60, 0.7);

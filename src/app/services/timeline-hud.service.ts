@@ -164,6 +164,63 @@ export class TimelineHudService {
         }
         yTick += step;
       }
+    } else if (Math.abs(u - 1 / 12) < 1e-6) {
+      // Month tier: variable spacing by month length (incl. leap years)
+      const yStart = Math.floor(yTopYear) - 1;
+      const yEnd = Math.ceil(yBotYear) + 1;
+      for (let yr = yStart; yr <= yEnd; yr++) {
+        const diy = daysInYear(yr);
+        const febDays = diy === 366 ? 29 : 28;
+        const md = [31, febDays, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+        let cum = 0;
+        for (let m = 0; m < 12; m++) {
+          const yTick = yr + cum / diy;
+          if (yTick >= yTopYear - 1e-9 && yTick <= yBotYear + 1e-7) {
+            const yPx = yearToY(yTick);
+            ctx.fillStyle = this.grid.color;
+            ctx.fillRect(x0, Math.round(yPx - Math.floor(thick / 2)), segLen, thick);
+            const label = formatLabelByUnit(yTick, 1 / 12);
+            if (label) {
+              ctx.fillStyle = 'rgba(255,170,80,0.95)';
+              ctx.fillText(label, x0 - labelMargin, Math.round(yPx));
+            }
+          }
+          cum += md[m];
+        }
+      }
+    } else if (Math.abs(u - 10) < 1e-7) {
+      // Decade tier: ticks at decade boundaries, plus special tick at 1 C.E. (astronomical 1)
+      const step = 10;
+      const nextDecadeAtOrAbove = (y: number) =>
+        y >= 0 ? Math.ceil(y / step) * step : -Math.floor(Math.abs(y) / step) * step;
+
+      let yTick = nextDecadeAtOrAbove(yTopYear - 1e-9);
+      let safety = 0;
+      while (yTick <= yBotYear + 1e-7 && safety++ < 4000) {
+        if (yTick !== 0) {
+          const yPx = yearToY(yTick);
+          ctx.fillStyle = this.grid.color;
+          ctx.fillRect(x0, Math.round(yPx - Math.floor(thick / 2)), segLen, thick);
+          const label = formatLabelByUnit(yTick, 10);
+          if (label) {
+            ctx.fillStyle = 'rgba(255,170,80,0.95)';
+            ctx.fillText(label, x0 - labelMargin, Math.round(yPx));
+          }
+        }
+        yTick += step;
+      }
+
+      // Special tick at 1 C.E. (astronomical 1)
+      if (yTopYear <= 1 + 1e-7 && yBotYear >= 1 - 1e-9) {
+        const yPx = yearToY(1);
+        ctx.fillStyle = this.grid.color;
+        ctx.fillRect(x0, Math.round(yPx - Math.floor(thick / 2)), segLen, thick);
+        const label = formatLabelByUnit(1, 10);
+        if (label) {
+          ctx.fillStyle = 'rgba(255,170,80,0.95)';
+          ctx.fillText(label, x0 - labelMargin, Math.round(yPx));
+        }
+      }
     } else {
       let yTick = nextStepAtOrAbove(yTopYear - 1e-9, u);
       let safety = 0;
