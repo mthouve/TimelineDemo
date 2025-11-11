@@ -1,30 +1,38 @@
-<!-- fixed, viewport-pinned star container -->
-<div #starHost class="starhost">
-  <canvas #starCanvas class="starcanvas"></canvas>
+<div class="split-view">
+  <!-- Bible panel (left) -->
+  <app-bible-viewer />
+
+  <!-- Timeline panel (right) -->
+  <div class="timeline-panel">
+    <!-- fixed, viewport-pinned star container -->
+    <div #starHost class="starhost">
+      <canvas #starCanvas class="starcanvas"></canvas>
+    </div>
+
+    <!-- Centerline + timeline on top -->
+    <canvas #centerline id="centerline" class="layer"></canvas>
+    <canvas #timeline id="timeline" class="layer"></canvas>
+
+    <!-- Scroller to provide vertical space (height set in TS) -->
+    <main class="demo"></main>
+
+    <!-- Settings UI (contains zoom slider) -->
+    <app-settings-control class="timeline-settings">
+      <app-zoom-control
+        [min]="0"
+        [max]="zoomLevels.length - 1"
+        [labels]="zoomLabels"
+        [value]="currentZoomIdx"
+        [captionOverride]="zoomStepLabel || null"
+        [bridgeStart]="ZOOM_ANIM.active ? zoomVisualIndex : null"
+        [bridgeEnd]="ZOOM_ANIM.active ? ZOOM_ANIM.targetIdx : null"
+        [disabled]="scrollLocked || ZOOM_ANIM.active"
+        (inputValue)="onZoomInput($event)"
+        (valueChange)="onZoomChange($event)"
+      />
+    </app-settings-control>
+
+    <!-- Timeline info box -->
+    <app-info-box [entries]="infoEntries" [hidden]="infoBoxHidden" />
+  </div>
 </div>
-
-<!-- Centerline + timeline on top -->
-<canvas #centerline id="centerline" class="layer"></canvas>
-<canvas #timeline id="timeline" class="layer"></canvas>
-
-<!-- Scroller to provide vertical space (height set in TS) -->
-<main class="demo"></main>
-
-<!-- Settings UI (contains zoom slider) -->
-<app-settings-control>
-  <app-zoom-control
-    [min]="0"
-    [max]="zoomLevels.length - 1"
-    [labels]="zoomLabels"
-    [value]="currentZoomIdx"
-    [captionOverride]="zoomStepLabel || null"
-    [bridgeStart]="ZOOM_ANIM.active ? zoomVisualIndex : null"
-    [bridgeEnd]="ZOOM_ANIM.active ? ZOOM_ANIM.targetIdx : null"
-    [disabled]="scrollLocked || ZOOM_ANIM.active"
-    (inputValue)="onZoomInput($event)"
-    (valueChange)="onZoomChange($event)"
-  />
-</app-settings-control>
-
-<!-- Timeline info box -->
-<app-info-box [entries]="infoEntries" [hidden]="infoBoxHidden" />

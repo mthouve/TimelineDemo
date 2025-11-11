@@ -1,25 +1,118 @@
+/* Split view layout for Bible + Timeline */
+.split-view {
+  display: flex;
+  min-height: 100vh;
+  width: 100vw;
+  position: relative;
+}
+
+app-bible-viewer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 40vw; /* keep sidebar proportional and predictable */
+  min-width: 320px;
+  height: 100vh;
+  border-right: 2px solid #ff8c00;
+  background: #1a1a1a;
+  z-index: 10;
+  display: block;
+  overflow: hidden;
+}
+
+.timeline-panel {
+  margin-left: 40vw; /* match sidebar */
+  min-width: 320px;
+  min-height: 100vh;
+  position: relative;
+  background: #0a0a0a;
+  z-index: 1;
+}
+
+/* Reposition settings control so it is always visible within timeline area */
+.timeline-settings .settingsUI {
+  left: auto !important;
+  bottom: auto !important;
+  right: 16px !important; /* top-right within timeline window */
+  top: 16px !important;
+  z-index: 20 !important; /* above HUD lines */
+}
+
+@media (max-width: 900px) {
+  .timeline-settings .settingsUI {
+    left: auto !important;
+    bottom: auto !important;
+    right: 16px !important;
+    top: 12px !important; /* keep top-right on mobile */
+  }
+}
+
+@media (max-width: 900px) {
+  .split-view {
+    flex-direction: column;
+  }
+  app-bible-viewer {
+    position: relative;
+    width: 100vw;
+    min-width: 0;
+    height: 40vh;
+    border-right: none;
+    border-bottom: 2px solid #ff8c00;
+  }
+  .timeline-panel {
+    margin-left: 0;
+    width: 100vw;
+    min-height: 60vh;
+  }
+}
+
+/* Canvases positioned within timeline panel area */
+.timeline-panel .starhost {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 40vw; /* align with sidebar */
+  right: 0;
+  overflow: hidden;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.timeline-panel #centerline,
+.timeline-panel #timeline {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 40vw; /* align with sidebar */
+  right: 0;
+  pointer-events: none;
+}
+
+/* Ensure dynamically created HUD canvases align with the timeline area */
+.timeline-panel .hud {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 40vw; /* align with sidebar */
+  right: 0;
+  pointer-events: none;
+}
+
+@media (max-width: 900px) {
+  .timeline-panel .starhost,
+  .timeline-panel #centerline,
+  .timeline-panel #timeline {
+    left: 0;
+    right: 0;
+  }
+}
+
 :host {
   display: contents;
 }
 
-/* Full-viewport, stacked canvases */
-.layer {
-  position: fixed;
-  inset: 0;
-  display: block;
-  width: 100vw;
-  height: 100vh;
-}
-
 #starfield {
   z-index: 0;
-}
-.starhost {
-  position: fixed;
-  inset: 0; /* top:0; right:0; bottom:0; left:0 */
-  overflow: hidden; /* never show scrollbars from star scaling */
-  z-index: 0; /* sits behind HUD/timeline */
-  pointer-events: none; /* stars never intercept input */
 }
 
 .starcanvas {
@@ -27,7 +120,7 @@
   inset: 0;
   width: 100%;
   height: 100%;
-  display: block; /* no gaps */
+  display: block;
 }
 
 .hud {

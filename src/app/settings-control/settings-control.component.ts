@@ -39,6 +39,21 @@ import { faGear } from '@fortawesome/free-solid-svg-icons';
         align-items: center;
         gap: 12px;
       }
+      /* When component is wrapped with a parent that has the class 'timeline-settings' (added in app.html),
+      move it to the top-right of the viewport so it is outside the Bible viewer overlay. */
+      :host-context(.timeline-settings) .settingsUI {
+        left: auto;
+        bottom: auto;
+        right: 16px;
+        top: 16px;
+        z-index: 30; /* ensure above Bible sidebar */
+      }
+      :host-context(.timeline-settings) .settingsUI.minimized {
+        left: auto;
+        bottom: auto;
+        right: 16px;
+        top: 16px;
+      }
       .settingsUI.minimized {
         padding: 0;
         min-width: 0;

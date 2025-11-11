@@ -13,6 +13,7 @@ import { TimelineHudService } from './services/timeline-hud.service';
 import { ZoomControlComponent } from './zoom-control/zoom-control.component';
 import { SettingsControlComponent } from './settings-control/settings-control.component';
 import { InfoBoxComponent, InfoBoxEntry } from './info-box/info-box.component';
+import { BibleViewerComponent } from './bible-viewer/bible-viewer.component';
 import { CommonModule } from '@angular/common';
 
 // Animation envelope (typed)
@@ -50,7 +51,13 @@ type ZoomAnim = {
   standalone: true,
   templateUrl: './app.html',
   styleUrl: './app.scss',
-  imports: [ZoomControlComponent, SettingsControlComponent, InfoBoxComponent, CommonModule],
+  imports: [
+    ZoomControlComponent,
+    SettingsControlComponent,
+    InfoBoxComponent,
+    BibleViewerComponent,
+    CommonModule,
+  ],
 })
 export class App implements AfterViewInit, OnDestroy {
   constructor(

@@ -1,0 +1,132 @@
+.bible-viewer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background: #000;
+  color: rgba(255, 170, 80, 0.98);
+  box-sizing: border-box;
+}
+
+.bible-header {
+  display: flex;
+  gap: 0.5em;
+  align-items: center;
+  padding: 0.5em 1em;
+  background: rgba(20, 12, 6, 0.8);
+  border-bottom: 1px solid rgba(255, 150, 60, 0.5);
+  flex-wrap: wrap;
+}
+
+.bible-header select,
+.bible-header input {
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell;
+  font-size: 12px;
+  padding: 0.3em 0.6em;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 150, 60, 0.5);
+  background: rgba(20, 12, 6, 0.6);
+  color: rgba(255, 170, 80, 0.98);
+  outline: none;
+}
+
+.bible-header select:focus,
+.bible-header input:focus {
+  border-color: rgba(255, 150, 60, 0.95);
+  box-shadow: 0 0 0 2px rgba(255, 150, 60, 0.2);
+}
+
+.bible-header input {
+  flex: 1;
+  min-width: 120px;
+}
+
+.bible-header button {
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell;
+  font-size: 12px;
+  padding: 0.3em 0.8em;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 150, 60, 0.5);
+  background: rgba(20, 12, 6, 0.6);
+  color: rgba(255, 170, 80, 0.98);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.bible-header button:hover {
+  background: rgba(255, 150, 60, 0.25);
+  border-color: rgba(255, 150, 60, 0.95);
+}
+
+.bible-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1em;
+}
+
+.bible-verse {
+  margin-bottom: 0.8em;
+  line-height: 1.6;
+}
+
+.bible-verse .ref {
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell;
+  font-size: 13px;
+  color: rgba(255, 170, 80, 0.6);
+  font-weight: normal;
+  margin-right: 0.5em;
+  display: inline-block;
+  min-width: 80px;
+}
+
+.bible-verse .text {
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell;
+  font-size: 12px;
+  color: rgba(255, 170, 80, 0.98);
+}
+
+.bible-search-results {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1em;
+}
+
+.search-result {
+  margin-bottom: 1em;
+  padding: 0.7em;
+  border-radius: 4px;
+  background: rgba(20, 12, 6, 0.6);
+  border: 1px solid rgba(255, 150, 60, 0.3);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.search-result:hover {
+  background: rgba(20, 12, 6, 0.9);
+  border-color: rgba(255, 150, 60, 0.95);
+}
+
+.search-result .ref {
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell;
+  font-size: 13px;
+  color: rgba(255, 170, 80, 0.98);
+  font-weight: normal;
+  margin-right: 0.5em;
+  display: block;
+  margin-bottom: 0.3em;
+}
+
+.search-result .preview {
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell;
+  font-size: 12px;
+  color: rgba(255, 200, 150, 0.92);
+  line-height: 1.5;
+}
+
+.search-result .preview mark {
+  background: rgba(255, 150, 60, 0.35);
+  color: rgba(255, 170, 80, 0.98);
+  font-weight: normal;
+  border-radius: 2px;
+  padding: 0 3px;
+}
