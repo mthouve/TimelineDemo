@@ -11,6 +11,7 @@ import { StarfieldRendererService } from './services/starfield-renderer.service'
 import { TimelineDateService, ZoomSpec } from './services/timeline-date.service';
 import { TimelineHudService } from './services/timeline-hud.service';
 import { ZoomControlComponent } from './zoom-control/zoom-control.component';
+import { SettingsControlComponent } from './settings-control/settings-control.component';
 
 // Animation envelope (typed)
 type ZoomAnim = {
@@ -47,7 +48,7 @@ type ZoomAnim = {
   standalone: true,
   templateUrl: './app.html',
   styleUrl: './app.scss',
-  imports: [ZoomControlComponent],
+  imports: [ZoomControlComponent, SettingsControlComponent],
 })
 export class App implements AfterViewInit, OnDestroy {
   constructor(

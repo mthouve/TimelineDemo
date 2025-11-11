@@ -60,14 +60,12 @@ import { CommonModule } from '@angular/common';
       }
 
       .zoomUI {
-        position: fixed;
-        left: 12px;
-        bottom: 12px;
-        z-index: 6;
-        padding: 8px 10px;
-        background: rgba(0, 0, 0, 0.35);
-        border: 1px solid rgba(255, 150, 60, 0.55);
-        border-radius: 8px;
+        padding: 0;
+        background: none;
+        border: none;
+        border-radius: 0;
+        position: static;
+        z-index: auto;
         pointer-events: auto;
       }
       .zoomLabel {
