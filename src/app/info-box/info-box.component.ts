@@ -16,7 +16,12 @@ export interface InfoBoxEntry {
     <div class="info-box" [class.hidden]="hidden">
       <div class="inner">
         <ng-container *ngIf="entries.length; else emptyState">
-          <div class="entry" *ngFor="let e of entries" [class.primary]="e.isPrimary" [class.secondary]="!e.isPrimary">
+          <div
+            class="entry"
+            *ngFor="let e of entries"
+            [class.primary]="e.isPrimary"
+            [class.secondary]="!e.isPrimary"
+          >
             <div class="when">{{ e.label }}</div>
             <div class="desc">{{ e.when }}</div>
           </div>

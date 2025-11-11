@@ -77,7 +77,7 @@ export class App implements AfterViewInit, OnDestroy {
     }
 
     const centerYF = this.centerYF ?? this.yToYearDev(this.CH / 2);
-    
+
     // One HUD spacing represents this.TL.unitYears (e.g., 1 year in Year view, 10 in Decade view)
     // Primary: within ~1 HUD line spacing (in years)
     // Secondary: within ~2 HUD line spacings (in years)
@@ -90,11 +90,11 @@ export class App implements AfterViewInit, OnDestroy {
       if (dy <= secondaryRange) {
         nearbyEntries.push({
           ...e,
-          isPrimary: dy <= primaryRange
+          isPrimary: dy <= primaryRange,
         });
       }
     }
-    
+
     // Already in chronological order, just limit total count
     this.infoEntries = nearbyEntries.slice(0, 16);
     this.infoBoxHidden = this.infoEntries.length === 0;
