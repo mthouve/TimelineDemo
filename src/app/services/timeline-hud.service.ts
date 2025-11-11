@@ -108,10 +108,7 @@ export class TimelineHudService {
     const segLen = Math.max(2, Math.round((screenWidth || Wc) * 0.1 * dpr));
     const x0 = Math.round((Wc - segLen) / 2);
 
-    ctx.font = `${Math.max(
-      10,
-      Math.round(12 * dpr)
-    )}px system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell`;
+    ctx.font = `${Math.max(11, Math.round(13 * dpr))}px system-ui, sans-serif`;
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'right';
     const labelMargin = Math.round(6 * dpr);

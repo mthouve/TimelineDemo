@@ -572,7 +572,7 @@ export class App implements AfterViewInit, OnDestroy {
     const out: { label: string; when: string; yf: number; yearOnly: boolean }[] = [];
     for (const key of Object.keys(this.TIMELINE_POINTS)) {
       const when = this.TIMELINE_POINTS[key];
-      const { yf, yearOnly } = this.yearParseWithFlag(when);
+      const { yf, yearOnly } = this.yearParseWithFlag(key);
       if (!isNaN(yf)) out.push({ label: key, when, yf, yearOnly });
     }
     out.sort((a, b) => a.yf - b.yf);

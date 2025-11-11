@@ -144,12 +144,17 @@ export class TimelineDateService {
         let doy = day;
         for (let k = 0; k < mi; k++) doy += mdays[k];
         const frac = this.clamp((doy - 1) / 365, 0, 0.999999);
-        return hasBCE ? -Math.abs(yAbs) + frac : yAbs + frac;
+        // Convert historical year to astronomical: B.C.E. years need +1
+        const astronomicalYear = hasBCE ? this.historicalToAstronomical(-Math.abs(yAbs)) : yAbs;
+        return astronomicalYear + frac;
       }
     }
 
     const yOnly = lastInt(raw);
-    if (!isNaN(yOnly)) return hasBCE ? -Math.abs(yOnly) : yOnly;
+    if (!isNaN(yOnly)) {
+      // Convert historical year to astronomical: B.C.E. years need +1
+      return hasBCE ? this.historicalToAstronomical(-Math.abs(yOnly)) : yOnly;
+    }
     return NaN;
   }
 
@@ -220,8 +225,16 @@ export class TimelineDateService {
       'Nov',
       'Dec',
     ];
+
+    // Ensure dayOfYear is in valid range [0, daysInYear)
+    let dayOfYear = Math.max(0, dayOfYear0);
+    const diy = this.daysInYear(year);
+    if (dayOfYear >= diy) {
+      dayOfYear = diy - 1;
+    }
+
     let mi = 0,
-      dleft = dayOfYear0;
+      dleft = dayOfYear;
     while (mi < 12 && dleft >= md[mi]) {
       dleft -= md[mi];
       mi++;
@@ -231,14 +244,31 @@ export class TimelineDateService {
       dleft = md[11] - 1;
     }
     const day = dleft + 1;
-    const yr = year < 0 ? -year : year;
-    const tail = year < 0 ? ' B.C.E.' : ' C.E.';
-    return `${months2[mi]} ${day}, ${yr}${tail}`;
+    const historicalYear = this.astronomicalToHistorical(year);
+    const yr = historicalYear < 0 ? -historicalYear : historicalYear;
+    const tail = historicalYear < 0 ? ' B.C.E.' : ' C.E.';
+    return `Week of ${months2[mi]} ${day}, ${yr}${tail}`;
   }
 
   snapToUnit(yf: number, unit: number) {
     if (!unit) return yf;
     return yf >= 0 ? Math.floor(yf / unit) * unit : -Math.ceil(Math.abs(yf) / unit) * unit;
+  }
+
+  // Convert from astronomical year (includes 0) to historical year (1 BCE -> 1 CE)
+  astronomicalToHistorical(year: number): number {
+    if (year <= 0) {
+      return year - 1; // 0 -> -1, -1 -> -2, etc.
+    }
+    return year; // Positive years unchanged
+  }
+
+  // Convert from historical year to astronomical year
+  historicalToAstronomical(year: number): number {
+    if (year < 0) {
+      return year + 1; // -1 -> 0, -2 -> -1, etc.
+    }
+    return year; // Positive years unchanged
   }
 
   // Reimplement the formatLabelByUnit logic here so callers can get formatted labels
@@ -290,10 +320,13 @@ export class TimelineDateService {
         dleft = md[11] - 1;
       }
       const day = dleft + 1;
-      let yr3 = isBCE ? -yInt : yInt;
-      const tail2 = yr3 < 0 ? ' B.C.E.' : ' C.E.';
-      if (yr3 < 0) yr3 = -yr3;
-      return `${months2[mi]} ${day}, ${yr3}${tail2}`;
+
+      // Convert astronomical year to historical year for display
+      const astronomicalYear = isBCE ? -yInt : yInt;
+      const historicalYear = this.astronomicalToHistorical(astronomicalYear);
+      const absYear = Math.abs(historicalYear);
+      const tail2 = historicalYear < 0 ? ' B.C.E.' : ' C.E.';
+      return `${months2[mi]} ${day}, ${absYear}${tail2}`;
     }
 
     if (this.isApproximatelyEqual(unit, 7 / this.MEAN_YEAR, 0.02)) {
@@ -324,15 +357,20 @@ export class TimelineDateService {
         'Nov',
         'Dec',
       ];
-      let yr2 = isBCE ? -yInt : yInt;
-      const tail = yr2 < 0 ? ' B.C.E.' : ' C.E.';
-      if (yr2 < 0) yr2 = -yr2;
-      return `${months[m]} ${yr2}${tail}`;
+
+      // Convert astronomical year to historical year for display
+      const astronomicalYear = isBCE ? -yInt : yInt;
+      const historicalYear = this.astronomicalToHistorical(astronomicalYear);
+      const absYear = Math.abs(historicalYear);
+      const tail = historicalYear < 0 ? ' B.C.E.' : ' C.E.';
+      return `${months[m]} ${absYear}${tail}`;
     }
 
     if (unit >= 1) {
-      const yr = isBCE ? -Math.round(abs) : Math.round(abs);
-      return yr < 0 ? `${-yr} B.C.E.` : `${yr} C.E.`;
+      // Convert astronomical year (may include 0) to historical year for display
+      const historicalYear = this.astronomicalToHistorical(Math.round(yf));
+      const absYear = Math.abs(historicalYear);
+      return historicalYear < 0 ? `${absYear} B.C.E.` : `${absYear} C.E.`;
     }
     return '';
   }
