@@ -13,7 +13,7 @@ app-bible-viewer {
   width: 40vw; /* keep sidebar proportional and predictable */
   min-width: 320px;
   height: 100vh;
-  border-right: 2px solid #ff8c00;
+  border-right: 1px solid rgba(140, 70, 10, 0.5);
   background: #1a1a1a;
   z-index: 10;
   display: block;
@@ -57,7 +57,7 @@ app-bible-viewer {
     min-width: 0;
     height: 40vh;
     border-right: none;
-    border-bottom: 2px solid #ff8c00;
+    border-bottom: 1px solid rgba(140, 70, 10, 0.5);
   }
   .timeline-panel {
     margin-left: 0;

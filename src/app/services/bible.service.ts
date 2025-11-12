@@ -144,7 +144,9 @@ export class BibleService {
           const textLower = verse.text.toLowerCase();
           if (textLower.includes(queryLower)) {
             const matchCount = (textLower.match(new RegExp(queryLower, 'g')) || []).length;
-            const preview = this.createPreview(verse.text, query);
+            const previewRaw = this.createPreview(verse.text, query);
+            // Apply bracket italics after highlight markup is added
+            const preview = this.applyBracketItalics(previewRaw);
 
             results.push({
               reference: {
@@ -180,6 +182,13 @@ export class BibleService {
     // Highlight the match
     const regex = new RegExp(`(${query})`, 'gi');
     return preview.replace(regex, '<mark>$1</mark>');
+  }
+
+  /** Wraps any {content} in <em>content</em>. Leaves nested braces literal; strips outer braces. */
+  applyBracketItalics(html: string): string {
+    // We only operate on plain text segments; preview already small. Safe global replace.
+    // Match { ... } non-greedy, avoid crossing tags. Use a regex that stops at first closing brace.
+    return html.replace(/\{([^{}]+)\}/g, (_m, inner) => `<em>${inner}</em>`);
   }
 
   formatReference(ref: BibleReference): string {

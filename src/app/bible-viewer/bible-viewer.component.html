@@ -23,11 +23,25 @@
     #bibleContent
     (wheel)="onWheel($event, bibleContent)"
   >
-    <div *ngFor="let verse of verses()" class="bible-verse">
-      <span class="ref"
-        >{{ selectedBook()?.abbreviation }} {{ selectedChapter() }}:{{ verse.verse }}</span
-      >
-      <span class="text">{{ verse.text }}</span>
+    <div
+      *ngFor="let verse of verses()"
+      class="bible-verse"
+      [class.with-originals]="showOriginals()"
+    >
+      <div class="verse-line">
+        <span class="ref"
+          >{{ selectedBook()?.abbreviation }} {{ selectedChapter() }}:{{ verse.verse }}</span
+        >
+        <span class="text" [innerHTML]="formatVerseHtml(verse.text)"></span>
+      </div>
+      <div class="orig-text" *ngIf="showOriginals()">
+        <div class="hebrew" *ngIf="getOriginalText(verse.book, verse.chapter, verse.verse).hebrew">
+          {{ getOriginalText(verse.book, verse.chapter, verse.verse).hebrew }}
+        </div>
+        <div class="greek" *ngIf="getOriginalText(verse.book, verse.chapter, verse.verse).greek">
+          {{ getOriginalText(verse.book, verse.chapter, verse.verse).greek }}
+        </div>
+      </div>
     </div>
   </div>
 
@@ -37,13 +51,14 @@
     #searchResultsContainer
     (wheel)="onWheel($event, searchResultsContainer)"
   >
-    <div
+    <button
       *ngFor="let result of searchResults()"
+      type="button"
       class="search-result"
       (click)="goToReference(result.reference)"
     >
       <span class="ref">{{ formatReference(result.reference) }}</span>
       <span class="preview" [innerHTML]="result.preview"></span>
-    </div>
+    </button>
   </div>
 </div>

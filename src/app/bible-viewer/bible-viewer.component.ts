@@ -1,7 +1,9 @@
 import { Component, Input, Signal, signal, OnInit, ElementRef, ViewChild } from '@angular/core';
+import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { BibleService } from '../services/bible.service';
+import { OriginalLanguageService } from '../services/original-language.service';
 import {
   BibleBook,
   BibleVerse,
@@ -30,11 +32,16 @@ export class BibleViewerComponent implements OnInit {
   searchQueryText = ''; // Plain property for ngModel
   loading = signal<boolean>(false);
 
-  constructor(private bibleService: BibleService) {}
+  showOriginals = signal<boolean>(true);
+  constructor(
+    private bibleService: BibleService,
+    private originals: OriginalLanguageService,
+    private sanitizer: DomSanitizer
+  ) {}
 
   async ngOnInit() {
     this.loading.update(() => true);
-    await this.bibleService.loadBible();
+    await Promise.all([this.bibleService.loadBible(), this.originals.load()]);
     this.books.update(() => this.bibleService.getBooks());
     this.loading.update(() => false);
     // Default to Genesis 1
@@ -115,5 +122,47 @@ export class BibleViewerComponent implements OnInit {
 
     // Stop propagation to prevent timeline from scrolling
     event.stopPropagation();
+  }
+
+  getOriginalText(
+    book: string,
+    chapter: number,
+    verse: number
+  ): { hebrew?: string; greek?: string } {
+    // Hebrew applies to OT, Greek to NT
+    const b = this.books().find((b) => b.name === book);
+    if (!b) return {};
+    const hebrew =
+      b.testament === 'OT' ? this.originals.getHebrew(book, chapter, verse) : undefined;
+    const greek = b.testament === 'NT' ? this.originals.getGreek(book, chapter, verse) : undefined;
+    return { hebrew, greek };
+  }
+
+  toggleOriginals() {
+    this.showOriginals.update((v) => !v);
+  }
+
+  formatVerseHtml(text: string): SafeHtml {
+    // Detect trailing glossary-style brackets: {word: definition} or {phrase: definition}
+    // There can be multiple at the end; collect them.
+    let working = text.trimEnd();
+    const glosses: string[] = [];
+    const glossRegex = /\s*\{([^{}]*?:[^{}]*?)\}\s*$/; // non-greedy inside, requires a colon
+    while (glossRegex.test(working)) {
+      const m = working.match(glossRegex);
+      if (!m) break;
+      glosses.unshift(m[1]); // preserve original order (left to right)
+      working = working.replace(glossRegex, '').trimEnd();
+    }
+
+    // Italicize remaining bracket segments (non-gloss) inline.
+    const body = working.replace(/\{([^{}]+)\}/g, (_m, inner) => `<em>${inner}</em>`);
+
+    // Append glosses dimmed.
+    const glossHtml = glosses
+      .map((g) => ` <span class="gloss"><em>${g}</em></span>`) // keep colon content italic but dim via CSS
+      .join('');
+    const finalHtml = body + glossHtml;
+    return this.sanitizer.bypassSecurityTrustHtml(finalHtml);
   }
 }

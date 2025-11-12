@@ -1,0 +1,28 @@
+<div class="attribution-root">
+  <button class="attr-toggle" (click)="toggle()" [attr.aria-expanded]="open()">Sources ▸</button>
+  <div class="attr-panel" *ngIf="open()">
+    <div class="line"><strong>Text Sources</strong></div>
+    <div class="line">
+      <span class="label">KJV (normalized 1769)</span>
+      <span class="value"
+        >Dataset © Thiago Bodruk (MIT). Underlying translation public domain.</span
+      >
+    </div>
+    <div class="line">
+      <span class="label">Hebrew OT (WLC)</span>
+      <span class="value"
+        >Westminster Leningrad Codex – packaged via scrollmapper/bible_databases (MIT).</span
+      >
+    </div>
+    <div class="line">
+      <span class="label">Greek NT (Byz 2013)</span>
+      <span class="value"
+        >Byzantine Textform 2013 – packaged via scrollmapper/bible_databases (MIT).</span
+      >
+    </div>
+    <div class="line dim">
+      MIT license requires retaining copyright notice & permission text on redistribution.
+    </div>
+    <div class="line dim">KJV translation itself is public domain; datasets are MIT.</div>
+  </div>
+</div>

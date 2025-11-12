@@ -6,6 +6,9 @@
   background: #000;
   color: rgba(255, 170, 80, 0.98);
   box-sizing: border-box;
+  /* Reference column sizing used for alignment of originals */
+  --ref-width: 80px;
+  --ref-gap: 0.5em;
 }
 
 .bible-header {
@@ -71,6 +74,16 @@
 .bible-verse {
   margin-bottom: 0.8em;
   line-height: 1.6;
+  display: flex;
+  flex-direction: column;
+}
+.bible-verse.with-originals {
+  border-left: 3px solid rgba(255, 150, 60, 0.95);
+  padding-left: 8px;
+}
+
+.bible-verse .verse-line {
+  display: flex;
 }
 
 .bible-verse .ref {
@@ -79,7 +92,7 @@
   color: rgba(255, 170, 80, 0.6);
   font-weight: normal;
   margin-right: 0.5em;
-  display: inline-block;
+  flex-shrink: 0;
   min-width: 80px;
 }
 
@@ -87,6 +100,42 @@
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell;
   font-size: 12px;
   color: rgba(255, 170, 80, 0.98);
+  flex: 1;
+}
+.bible-verse .text .gloss {
+  color: rgba(255, 170, 80, 0.5); /* stronger dim so difference is clearer */
+  font-style: italic;
+  display: inline-block; /* prevents inheriting wrap style ambiguity */
+  margin-left: 4px; /* slight separation from main verse */
+}
+
+/* Ensure styles apply to HTML injected via [innerHTML] (which lacks emulated encapsulation attrs) */
+:host ::ng-deep .gloss {
+  color: rgba(255, 170, 80, 0.5);
+  font-style: italic;
+}
+
+.bible-verse .orig-text {
+  margin-top: 4px;
+  /* Align with KJV text start (after reference column and its gap) */
+  margin-left: calc(var(--ref-width) + var(--ref-gap));
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: calc(100% - (var(--ref-width) + var(--ref-gap))); /* mirror verse text width */
+}
+.bible-verse .orig-text .hebrew,
+.bible-verse .orig-text .greek {
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Ubuntu, Cantarell, 'Noto Sans',
+    'Noto Serif', serif;
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(255, 200, 150, 0.92);
+  direction: rtl;
+}
+.bible-verse .orig-text .greek {
+  direction: ltr;
+  text-align: left;
 }
 
 .bible-search-results {
