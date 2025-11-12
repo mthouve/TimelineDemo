@@ -66,6 +66,10 @@ export class App implements AfterViewInit, OnDestroy {
     private hudService: TimelineHudService,
     private r2: Renderer2
   ) {
+    // Ensure a sensible base page title for tests and initial load
+    if (!document.title || document.title.trim() === '') {
+      document.title = 'Timeline Demo';
+    }
     this.zoomLevels = this.dateService.getZoomLevels();
     this.zoomLabels = this.dateService.getZoomLabels();
     this.TIMELINE_POINTS = this.dateService.getTimelinePoints();
@@ -746,7 +750,16 @@ export class App implements AfterViewInit, OnDestroy {
     return this.MONTHS[monthIndex];
   }
 
-  private drawHudLayer(ctx: CanvasRenderingContext2D, Wc: number, Hc: number, unitYears: number) {
+  private drawHudLayer(
+    ctx: CanvasRenderingContext2D,
+    Wc: number,
+    Hc: number,
+    unitYears: number,
+    zoomIdx?: number
+  ) {
+    const idx = zoomIdx ?? this.currentZoomIdx;
+    const zoomLevelName = this.zoomLevels[idx]?.name ?? 'Year';
+
     this.hudService.drawHudLayer({
       ctx,
       canvasWidth: Wc,
@@ -754,6 +767,7 @@ export class App implements AfterViewInit, OnDestroy {
       dpr: this.DPR,
       screenWidth: window.innerWidth,
       unitYears,
+      zoomLevelName,
       yearToY: this.yearToY.bind(this),
       yToYearDev: this.yToYearDev.bind(this),
       nowYearFraction: this.nowYearFraction.bind(this),
@@ -761,6 +775,7 @@ export class App implements AfterViewInit, OnDestroy {
       labelFromDayOfYear: this.labelFromDayOfYear.bind(this),
       daysInYear: this.daysInYear.bind(this),
       getMonthName: this.getMonthName.bind(this),
+      dateService: this.dateService,
     });
   }
 
@@ -779,8 +794,8 @@ export class App implements AfterViewInit, OnDestroy {
       from.ctx.clearRect(0, 0, this.W, this.H);
       to.ctx.clearRect(0, 0, this.W, this.H);
 
-      this.drawHudLayer(from.ctx, this.W, this.H, fromUnit);
-      this.drawHudLayer(to.ctx, this.W, this.H, toUnit);
+      this.drawHudLayer(from.ctx, this.W, this.H, fromUnit, this.animFromIdx);
+      this.drawHudLayer(to.ctx, this.W, this.H, toUnit, this.animToIdx);
 
       from.el.style.opacity = String(fadeFrom);
       to.el.style.opacity = String(fadeTo);
@@ -793,7 +808,13 @@ export class App implements AfterViewInit, OnDestroy {
       h.el.style.opacity = i === this.currentZoomIdx ? '1' : '0';
     }
     const cur = this.HUDS[this.currentZoomIdx];
-    this.drawHudLayer(cur.ctx, this.W, this.H, this.zoomLevels[this.currentZoomIdx].unit);
+    this.drawHudLayer(
+      cur.ctx,
+      this.W,
+      this.H,
+      this.zoomLevels[this.currentZoomIdx].unit,
+      this.currentZoomIdx
+    );
   }
 
   private formatLabelByUnit(yf: number, unit: number) {

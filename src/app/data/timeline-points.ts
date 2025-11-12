@@ -13,4 +13,5 @@ export const TIMELINE_POINTS: Record<string, string> = {
   'June 1, 2025 C.E.': 'On this day, something extraordinary occurred.',
   'September 30, 2025 C.E.': 'This is when something memorable happened.',
   '2050 C.E.': 'In the future, something incredible is set to happen this year.',
+  '2060 C.E.': 'Resurrection of the dead - 1 Cor 15:22-24',
 };

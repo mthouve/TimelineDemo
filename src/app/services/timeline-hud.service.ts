@@ -30,6 +30,7 @@ export interface DrawHudLayerParams {
   dpr: number;
   screenWidth: number;
   unitYears: number;
+  zoomLevelName: string;
   yearToY: (y: number) => number;
   yToYearDev: (yDev: number) => number;
   nowYearFraction: () => number;
@@ -37,6 +38,7 @@ export interface DrawHudLayerParams {
   labelFromDayOfYear: (year: number, dayOfYear: number) => string;
   daysInYear: (year: number) => number;
   getMonthName: (month: number) => string;
+  dateService: any;
 }
 
 @Injectable({
@@ -93,13 +95,13 @@ export class TimelineHudService {
       canvasHeight: Hc,
       dpr,
       screenWidth,
-      unitYears: u,
+      zoomLevelName,
       yearToY,
       yToYearDev,
       nowYearFraction,
       formatLabelByUnit,
-      labelFromDayOfYear,
-      daysInYear,
+      unitYears: u,
+      dateService,
     } = params;
 
     ctx.clearRect(0, 0, Wc, Hc);
@@ -116,125 +118,59 @@ export class TimelineHudService {
     const yTopYear = yToYearDev(0);
     const yBotYear = yToYearDev(Hc);
 
-    const isDayTier = u < 1 / 300; // Approximately less than a day
-    const isWeekTier = u >= 1 / 300 && u <= 1 / 50; // Approximately week-scale
+    // Find the first HUD line position
+    // Start slightly before the visible area to ensure we catch the first tick
+    let yTick: number;
 
-    const nextStepAtOrAbove = (y: number, step: number) =>
-      y >= 0 ? Math.ceil(y / step) * step : -Math.floor(Math.abs(y) / step) * step;
-
-    if (isDayTier && !isWeekTier) {
-      const step = 1 / 365;
-      let yTick = nextStepAtOrAbove(yTopYear - 1e-9, step);
-      const visibleYears = Math.max(0, yBotYear - yTopYear);
-      const maxTicks = Math.min(15000, Math.ceil(visibleYears / step) + 20);
-      let safety = 0;
-      while (yTick <= yBotYear + 1e-7 && safety++ < maxTicks) {
-        const yPx = yearToY(yTick);
-        ctx.fillStyle = this.grid.color;
-        ctx.fillRect(x0, Math.round(yPx - Math.floor(thick / 2)), segLen, thick);
-        const yr = yTick >= 0 ? Math.floor(yTick) : Math.ceil(yTick);
-        const diy = daysInYear(yr);
-        const label = formatLabelByUnit(yTick, 1 / diy);
-        if (label) {
-          ctx.fillStyle = 'rgba(255,170,80,0.95)';
-          ctx.fillText(label, x0 - labelMargin, Math.round(yPx));
-        }
-        yTick += step;
-      }
-    } else if (isWeekTier) {
-      const step = 7 / 365;
-      let yTick = nextStepAtOrAbove(yTopYear - 1e-9, step);
-      const visibleYears = Math.max(0, yBotYear - yTopYear);
-      const maxTicks = Math.min(6000, Math.ceil(visibleYears / step) + 20);
-      let safety = 0;
-      while (yTick <= yBotYear + 1e-7 && safety++ < maxTicks) {
-        const yPx = yearToY(yTick);
-        ctx.fillStyle = this.grid.color;
-        ctx.fillRect(x0, Math.round(yPx - Math.floor(thick / 2)), segLen, thick);
-
-        const yr = yTick >= 0 ? Math.floor(yTick) : Math.ceil(yTick);
-        const diy = daysInYear(yr);
-        const frac = yTick - (yTick >= 0 ? Math.floor(yTick) : Math.ceil(yTick));
-        let dayOfYear = Math.floor(frac * diy);
-        dayOfYear = dayOfYear - (dayOfYear % 7); // week start
-        const label = labelFromDayOfYear(yr, dayOfYear);
-        if (label) {
-          ctx.fillStyle = 'rgba(255,170,80,0.95)';
-          ctx.fillText(label, x0 - labelMargin, Math.round(yPx));
-        }
-        yTick += step;
-      }
-    } else if (Math.abs(u - 1 / 12) < 1e-6) {
-      // Month tier: variable spacing by month length (incl. leap years)
-      const yStart = Math.floor(yTopYear) - 1;
-      const yEnd = Math.ceil(yBotYear) + 1;
-      for (let yr = yStart; yr <= yEnd; yr++) {
-        const diy = daysInYear(yr);
-        const febDays = diy === 366 ? 29 : 28;
-        const md = [31, febDays, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-        let cum = 0;
-        for (let m = 0; m < 12; m++) {
-          const yTick = yr + cum / diy;
-          if (yTick >= yTopYear - 1e-9 && yTick <= yBotYear + 1e-7) {
-            const yPx = yearToY(yTick);
-            ctx.fillStyle = this.grid.color;
-            ctx.fillRect(x0, Math.round(yPx - Math.floor(thick / 2)), segLen, thick);
-            const label = formatLabelByUnit(yTick, 1 / 12);
-            if (label) {
-              ctx.fillStyle = 'rgba(255,170,80,0.95)';
-              ctx.fillText(label, x0 - labelMargin, Math.round(yPx));
-            }
-          }
-          cum += md[m];
-        }
-      }
-    } else if (Math.abs(u - 10) < 1e-7) {
-      // Decade tier: ticks at decade boundaries, plus special tick at 1 C.E. (astronomical 1)
-      const step = 10;
-      const nextDecadeAtOrAbove = (y: number) =>
-        y >= 0 ? Math.ceil(y / step) * step : -Math.floor(Math.abs(y) / step) * step;
-
-      let yTick = nextDecadeAtOrAbove(yTopYear - 1e-9);
-      let safety = 0;
-      while (yTick <= yBotYear + 1e-7 && safety++ < 4000) {
-        if (yTick !== 0) {
-          const yPx = yearToY(yTick);
-          ctx.fillStyle = this.grid.color;
-          ctx.fillRect(x0, Math.round(yPx - Math.floor(thick / 2)), segLen, thick);
-          const label = formatLabelByUnit(yTick, 10);
-          if (label) {
-            ctx.fillStyle = 'rgba(255,170,80,0.95)';
-            ctx.fillText(label, x0 - labelMargin, Math.round(yPx));
-          }
-        }
-        yTick += step;
-      }
-
-      // Special tick at 1 C.E. (astronomical 1)
-      if (yTopYear <= 1 + 1e-7 && yBotYear >= 1 - 1e-9) {
-        const yPx = yearToY(1);
-        ctx.fillStyle = this.grid.color;
-        ctx.fillRect(x0, Math.round(yPx - Math.floor(thick / 2)), segLen, thick);
-        const label = formatLabelByUnit(1, 10);
-        if (label) {
-          ctx.fillStyle = 'rgba(255,170,80,0.95)';
-          ctx.fillText(label, x0 - labelMargin, Math.round(yPx));
-        }
+    // Find first boundary by walking forward from a safe point before the viewport.
+    // This guarantees we start exactly on a real boundary for all units.
+    let cursor = Math.floor(yTopYear) - 2; // start a bit above
+    let boundary = dateService.nextDate(cursor, zoomLevelName);
+    // Guard against non-advancing nextDate to avoid infinite loops
+    let guard = 0;
+    const GUARD_MAX = 5000;
+    let prev = Number.NEGATIVE_INFINITY;
+    while (boundary.yf < yTopYear - 1e-9 && guard++ < GUARD_MAX) {
+      const next = dateService.nextDate(boundary.yf, zoomLevelName);
+      // If no progress, break to avoid freeze
+      if (!(next.yf > boundary.yf + 1e-12)) break;
+      prev = boundary.yf;
+      boundary = next;
+    }
+    // If we failed to reach the first visible boundary due to non-advancing step,
+    // fall back to snapping the top to a valid boundary to ensure we draw something.
+    if (boundary.yf < yTopYear - 1e-9) {
+      try {
+        yTick = dateService.snapToUnit(yTopYear, u);
+      } catch {
+        yTick = yTopYear; // last resort
       }
     } else {
-      let yTick = nextStepAtOrAbove(yTopYear - 1e-9, u);
-      let safety = 0;
-      while (yTick <= yBotYear + 1e-7 && safety++ < 4000) {
+      yTick = boundary.yf;
+    }
+
+    // Now navigate forward through all visible dates
+    let safety = 0;
+    const maxTicks = 15000;
+
+    while (yTick <= yBotYear + 1e-7 && safety++ < maxTicks) {
+      if (yTick >= yTopYear - 1e-9) {
+        // Use yTick directly for drawing; it already represents the exact boundary
+        // from nextDate (no epsilon)
         const yPx = yearToY(yTick);
         ctx.fillStyle = this.grid.color;
         ctx.fillRect(x0, Math.round(yPx - Math.floor(thick / 2)), segLen, thick);
 
         const label = formatLabelByUnit(yTick, u);
-        ctx.fillStyle = 'rgba(255,170,80,0.95)';
-        if (label) ctx.fillText(label, x0 - labelMargin, Math.round(yPx));
-
-        yTick += u;
+        if (label) {
+          ctx.fillStyle = 'rgba(255,170,80,0.95)';
+          ctx.fillText(label, x0 - labelMargin, Math.round(yPx));
+        }
       }
+
+      // Move to next date boundary
+      const next = dateService.nextDate(yTick, zoomLevelName);
+      yTick = next.yf;
     }
 
     // Today marker

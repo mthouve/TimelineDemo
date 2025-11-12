@@ -252,6 +252,104 @@ export class TimelineDateService {
 
   snapToUnit(yf: number, unit: number) {
     if (!unit) return yf;
+
+    // Day-aligned snapping (use actual year's length)
+    const calYear = yf >= 0 ? Math.floor(yf) : Math.ceil(yf);
+    const diy = this.daysInYear(calYear);
+
+    // Day tier (1/diy or ~1/365 or mean year fraction)
+    const isDayTier =
+      Math.abs(unit - 1 / diy) < 1e-7 ||
+      Math.abs(unit - 1 / 365) < 1e-5 ||
+      this.isApproximatelyEqual(unit, 1 / this.MEAN_YEAR, 0.02);
+
+    if (isDayTier) {
+      // Snap to exact start-of-day (no epsilon)
+      const yr = Math.floor(yf);
+      const diy0 = this.daysInYear(yr);
+      const frac = yf - yr;
+      const dayOfYear = Math.floor(frac * diy0);
+      return yr + dayOfYear / diy0;
+    }
+
+    // Week tier (~7/mean year)
+    if (this.isApproximatelyEqual(unit, 7 / this.MEAN_YEAR, 0.02)) {
+      // Snap to global week boundary anchored to absolute day 0 (no epsilon)
+      const idx = this.dayIndexFromYf(yf);
+      const weekStartIdx = Math.floor(idx / 7) * 7;
+      return this.yfFromDayIndex(weekStartIdx);
+    }
+
+    // Month tier (~1/12); compute by month boundaries for given year
+    if (Math.abs(unit - 1 / 12) < 1e-7) {
+      const yr = Math.floor(yf);
+      const diy0 = this.daysInYear(yr);
+      const frac = yf - yr;
+      const dayOfYear = Math.floor(frac * diy0);
+      const febDays = diy0 === 366 ? 29 : 28;
+      const md = [31, febDays, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+      let cum = 0;
+      let currentMonth = 11;
+      for (let m = 0; m < 12; m++) {
+        cum += md[m];
+        if (dayOfYear < cum) {
+          currentMonth = m;
+          break;
+        }
+      }
+      // Start of current month
+      const startOfMonth = cum - md[currentMonth];
+      // Snap to exact start of month (no epsilon)
+      return yr + startOfMonth / diy0;
+    }
+
+    // Year and larger units: use historical rounding rules implemented for next/previous
+    const fromHistorical = this.astronomicalToHistorical(Math.floor(yf));
+
+    // Year
+    if (Math.abs(unit - 1) < 1e-9) {
+      // Snap down to the start of historical year
+      const astro = this.historicalToAstronomical(fromHistorical);
+      return astro;
+    }
+
+    // Decade ~10 years
+    if (Math.abs(unit - 10) < 1e-6) {
+      if (fromHistorical < 0) {
+        const absH = Math.abs(fromHistorical);
+        const decadeAbs = Math.floor((absH - 1) / 10) * 10; // e.g., 150 -> 140, 11 -> 10, 10 -> 0
+        return decadeAbs <= 0 ? 1 : this.historicalToAstronomical(-decadeAbs);
+      } else {
+        const decade = Math.floor(fromHistorical / 10) * 10; // 1..10 -> 0, 11..20 -> 10, etc.
+        return this.historicalToAstronomical(Math.max(decade, 1));
+      }
+    }
+
+    // Century ~100 years
+    if (Math.abs(unit - 100) < 1e-6) {
+      if (fromHistorical < 0) {
+        const absH = Math.abs(fromHistorical);
+        const centAbs = Math.floor((absH - 1) / 100) * 100;
+        return centAbs <= 0 ? 1 : this.historicalToAstronomical(-centAbs);
+      } else {
+        const cent = Math.floor(fromHistorical / 100) * 100;
+        return this.historicalToAstronomical(Math.max(cent, 1));
+      }
+    }
+
+    // Millennium ~1000 years
+    if (Math.abs(unit - 1000) < 1e-6) {
+      if (fromHistorical < 0) {
+        const absH = Math.abs(fromHistorical);
+        const milAbs = Math.floor((absH - 1) / 1000) * 1000;
+        return milAbs <= 0 ? 1 : this.historicalToAstronomical(-milAbs);
+      } else {
+        const mil = Math.floor(fromHistorical / 1000) * 1000;
+        return this.historicalToAstronomical(Math.max(mil, 1));
+      }
+    }
+
+    // Default fallback
     return yf >= 0 ? Math.floor(yf / unit) * unit : -Math.ceil(Math.abs(yf) / unit) * unit;
   }
 
@@ -271,6 +369,336 @@ export class TimelineDateService {
     return year; // Positive years unchanged
   }
 
+  /**
+   * Move to the next date boundary based on the zoom level.
+   * Returns { yf: yearFraction, days: actualDaysBetween }
+   */
+  nextDate(fromYf: number, zoomLevel: string): { yf: number; days: number } {
+    switch (zoomLevel) {
+      case 'Day': {
+        // Move forward by exactly 1 absolute day
+        const idx = this.dayIndexFromYf(fromYf);
+        const nextIdx = idx + 1;
+        return { yf: this.yfFromDayIndex(nextIdx), days: 1 };
+      }
+
+      case 'Week': {
+        // Move forward to the next global week boundary (absolute 7-day blocks), no epsilon
+        const idx = this.dayIndexFromYf(fromYf);
+        const weekStart = Math.floor(idx / 7) * 7;
+        const nextIdx = weekStart + 7;
+        return { yf: this.yfFromDayIndex(nextIdx), days: 7 };
+      }
+
+      case 'Month': {
+        // Move to the start of the next month
+        const yr = Math.floor(fromYf);
+        const diy = this.daysInYear(yr);
+        const frac = fromYf - yr;
+        const dayOfYear = Math.floor(frac * diy + 1e-9);
+
+        const febDays = diy === 366 ? 29 : 28;
+        const monthDays = [31, febDays, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+        // Find current month by checking which month contains dayOfYear
+        let currentMonth = 11; // Default to December
+        let monthStartDay = 0;
+        for (let m = 0; m < 12; m++) {
+          const monthEndDay = monthStartDay + monthDays[m];
+          if (dayOfYear <= monthEndDay - 1) {
+            // Day is in month m (e.g., days 0-30 are in month 0)
+            currentMonth = m;
+            break;
+          }
+          monthStartDay = monthEndDay;
+        }
+
+        // Calculate days in current month
+        const daysInCurrentMonth = monthDays[currentMonth];
+
+        // Next month
+        const nextMonth = currentMonth + 1;
+
+        if (nextMonth >= 12) {
+          // Moving to January of next year
+          const nextYear = yr === 0 ? 1 : yr + 1;
+          // Start of next year (exact boundary)
+          return { yf: nextYear, days: daysInCurrentMonth };
+        } else {
+          // Same year, calculate start of next month
+          let cumToNextMonth = 0;
+          for (let m = 0; m < nextMonth; m++) {
+            cumToNextMonth += monthDays[m];
+          }
+          // Exact start of next month (no epsilon)
+          const result = yr + cumToNextMonth / diy;
+          return { yf: result, days: daysInCurrentMonth };
+        }
+      }
+
+      case 'Year': {
+        // Move to the next year start
+        const yr = Math.floor(fromYf);
+        const fromHistorical = this.astronomicalToHistorical(yr);
+
+        if (fromHistorical === -1) {
+          // From 1 BCE (astronomical 0) to 1 CE (astronomical 1)
+          return { yf: 1, days: 366 }; // 1 BCE was a leap year
+        }
+
+        const nextHistorical = fromHistorical + 1;
+        const nextAstro = this.historicalToAstronomical(nextHistorical);
+        const daysInCurrentYear = this.daysInYear(yr);
+
+        return { yf: nextAstro, days: daysInCurrentYear };
+      }
+
+      case 'Decade': {
+        const yr = Math.floor(fromYf);
+        const fromHistorical = this.astronomicalToHistorical(yr);
+
+        if (fromHistorical < 0) {
+          // For BCE dates, use rounded boundaries: 10, 20, 30, etc.
+          const absHistorical = Math.abs(fromHistorical);
+          const nextDecadeAbs = Math.floor((absHistorical - 1) / 10) * 10; // Next smaller rounded value
+
+          if (nextDecadeAbs <= 0) {
+            // From 10 BCE or less to 1 CE (astronomical 1)
+            return { yf: 1, days: this.daysBetween(yr, 1) };
+          } else {
+            const nextHistorical = -nextDecadeAbs;
+            const nextAstro = this.historicalToAstronomical(nextHistorical);
+            return { yf: nextAstro, days: this.daysBetween(yr, nextAstro) };
+          }
+        } else {
+          // For CE dates, use rounded boundaries: 10, 20, 30, etc.
+          const nextDecade = Math.floor(fromHistorical / 10) * 10 + 10;
+          return { yf: nextDecade, days: this.daysBetween(yr, nextDecade) };
+        }
+      }
+
+      case 'Century': {
+        const yr = Math.floor(fromYf);
+        const fromHistorical = this.astronomicalToHistorical(yr);
+
+        if (fromHistorical < 0) {
+          // For BCE dates, use rounded boundaries: 100, 200, 300, etc.
+          const absHistorical = Math.abs(fromHistorical);
+          const nextCenturyAbs = Math.floor((absHistorical - 1) / 100) * 100; // Next smaller rounded value
+
+          if (nextCenturyAbs <= 0) {
+            // From 100 BCE or less to 1 CE (astronomical 1)
+            return { yf: 1, days: this.daysBetween(yr, 1) };
+          } else {
+            const nextHistorical = -nextCenturyAbs;
+            const nextAstro = this.historicalToAstronomical(nextHistorical);
+            return { yf: nextAstro, days: this.daysBetween(yr, nextAstro) };
+          }
+        } else {
+          // For CE dates, use rounded boundaries: 100, 200, 300, etc.
+          const nextCentury = Math.floor(fromHistorical / 100) * 100 + 100;
+          return { yf: nextCentury, days: this.daysBetween(yr, nextCentury) };
+        }
+      }
+
+      case 'Milennium': {
+        const yr = Math.floor(fromYf);
+        const fromHistorical = this.astronomicalToHistorical(yr);
+
+        if (fromHistorical < 0) {
+          // For BCE dates, use rounded boundaries: 1000, 2000, 3000, etc.
+          const absHistorical = Math.abs(fromHistorical);
+          const nextMilenniumAbs = Math.floor((absHistorical - 1) / 1000) * 1000; // Next smaller rounded value
+
+          if (nextMilenniumAbs <= 0) {
+            // From 1000 BCE or less to 1 CE (astronomical 1)
+            return { yf: 1, days: this.daysBetween(yr, 1) };
+          } else {
+            const nextHistorical = -nextMilenniumAbs;
+            const nextAstro = this.historicalToAstronomical(nextHistorical);
+            return { yf: nextAstro, days: this.daysBetween(yr, nextAstro) };
+          }
+        } else {
+          // For CE dates, use rounded boundaries: 1000, 2000, 3000, etc.
+          const nextMilennium = Math.floor(fromHistorical / 1000) * 1000 + 1000;
+          return { yf: nextMilennium, days: this.daysBetween(yr, nextMilennium) };
+        }
+      }
+
+      default:
+        return { yf: fromYf + 1, days: 365 };
+    }
+  }
+
+  /**
+   * Move to the previous date boundary based on the zoom level.
+   * Returns { yf: yearFraction, days: actualDaysBetween }
+   */
+  previousDate(fromYf: number, zoomLevel: string): { yf: number; days: number } {
+    const fromAstro = Math.round(fromYf);
+    const fromHistorical = this.astronomicalToHistorical(fromAstro);
+    const isBCE = fromHistorical < 0;
+
+    switch (zoomLevel) {
+      case 'Day': {
+        // Move back by exactly 1 absolute day
+        const idx = this.dayIndexFromYf(fromYf);
+        const prevIdx = idx - 1;
+        return { yf: this.yfFromDayIndex(prevIdx), days: 1 };
+      }
+
+      case 'Week': {
+        // Move back to the previous global week boundary (absolute 7-day blocks), no epsilon
+        const idx = this.dayIndexFromYf(fromYf);
+        const weekStart = Math.floor(idx / 7) * 7;
+        const prevIdx = weekStart - 7;
+        return { yf: this.yfFromDayIndex(prevIdx), days: 7 };
+      }
+
+      case 'Month': {
+        // Move to the start of the previous month
+        const yr = Math.floor(fromYf);
+        const diy = this.daysInYear(yr);
+        const frac = fromYf - yr;
+        const dayOfYear = Math.floor(frac * diy + 1e-9);
+
+        // Month day lengths for the current year
+        const febDays = diy === 366 ? 29 : 28;
+        const monthDays = [31, febDays, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+        // Find current month (handle boundaries robustly)
+        let cumDays = 0;
+        let currentMonth = 11; // default to December
+        for (let m = 0; m < 12; m++) {
+          cumDays += monthDays[m];
+          if (dayOfYear < cumDays) {
+            currentMonth = m;
+            break;
+          }
+        }
+
+        // Previous month within the same year
+        const previousMonth = currentMonth - 1;
+        if (previousMonth >= 0) {
+          let cumToPrev = 0;
+          for (let m = 0; m < previousMonth; m++) cumToPrev += monthDays[m];
+          // Exact start of previous month (no epsilon)
+          return { yf: yr + cumToPrev / diy, days: monthDays[previousMonth] };
+        }
+
+        // Crossing into previous year → December of previous year
+        const prevYear = yr - 1;
+        const prevDiy = this.daysInYear(prevYear);
+        const prevFebDays = prevDiy === 366 ? 29 : 28;
+        const prevMonthDays = [31, prevFebDays, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+        let cumToDec = 0; // start of December
+        for (let m = 0; m < 11; m++) cumToDec += prevMonthDays[m];
+
+        return { yf: prevYear + cumToDec / prevDiy, days: prevMonthDays[11] };
+      }
+
+      case 'Year': {
+        // Move to the previous year
+        if (fromHistorical === 1) {
+          // From 1 CE (astronomical 1) to 1 BCE (astronomical 0)
+          return { yf: 0, days: 366 }; // 1 BCE was a leap year
+        } else {
+          const prevHistorical = fromHistorical - 1;
+          const prevAstro = this.historicalToAstronomical(prevHistorical);
+          const daysInPrevYear = this.daysInYear(prevAstro);
+
+          return { yf: prevAstro, days: daysInPrevYear };
+        }
+      }
+
+      case 'Decade': {
+        // Move to the previous decade boundary
+        if (fromHistorical === 1) {
+          // From 1 CE to 10 BCE (astronomical -9)
+          return { yf: -9, days: this.daysBetween(-9, 1) };
+        } else if (isBCE) {
+          const absHistorical = Math.abs(fromHistorical);
+          const currentDecade = Math.ceil(absHistorical / 10) * 10;
+          const prevDecade = currentDecade + 10; // Moving backward means larger absolute value
+
+          const prevHistorical = -prevDecade;
+          const prevAstro = this.historicalToAstronomical(prevHistorical);
+          return { yf: prevAstro, days: this.daysBetween(prevAstro, fromAstro) };
+        } else {
+          const currentDecade = Math.ceil(fromHistorical / 10) * 10;
+          const prevDecade = currentDecade - 10;
+          const prevAstro = prevDecade <= 0 ? -9 : prevDecade;
+          return { yf: prevAstro, days: this.daysBetween(prevAstro, fromAstro) };
+        }
+      }
+
+      case 'Century': {
+        // Move to the previous century boundary
+        if (fromHistorical === 1) {
+          // From 1 CE to 100 BCE (astronomical -99)
+          return { yf: -99, days: this.daysBetween(-99, 1) };
+        } else if (isBCE) {
+          const absHistorical = Math.abs(fromHistorical);
+          const currentCentury = Math.ceil(absHistorical / 100) * 100;
+          const prevCentury = currentCentury + 100; // Moving backward means larger absolute value
+
+          const prevHistorical = -prevCentury;
+          const prevAstro = this.historicalToAstronomical(prevHistorical);
+          return { yf: prevAstro, days: this.daysBetween(prevAstro, fromAstro) };
+        } else {
+          const currentCentury = Math.ceil(fromHistorical / 100) * 100;
+          const prevCentury = currentCentury - 100;
+          const prevAstro = prevCentury <= 0 ? -99 : prevCentury;
+          return { yf: prevAstro, days: this.daysBetween(prevAstro, fromAstro) };
+        }
+      }
+
+      case 'Milennium': {
+        // Move to the previous millennium boundary
+        if (fromHistorical === 1) {
+          // From 1 CE to 1000 BCE (astronomical -999)
+          return { yf: -999, days: this.daysBetween(-999, 1) };
+        } else if (isBCE) {
+          const absHistorical = Math.abs(fromHistorical);
+          const currentMilennium = Math.ceil(absHistorical / 1000) * 1000;
+          const prevMilennium = currentMilennium + 1000; // Moving backward means larger absolute value
+
+          const prevHistorical = -prevMilennium;
+          const prevAstro = this.historicalToAstronomical(prevHistorical);
+          return { yf: prevAstro, days: this.daysBetween(prevAstro, fromAstro) };
+        } else {
+          const currentMilennium = Math.ceil(fromHistorical / 1000) * 1000;
+          const prevMilennium = currentMilennium - 1000;
+          const prevAstro = prevMilennium <= 0 ? -999 : prevMilennium;
+          return { yf: prevAstro, days: this.daysBetween(prevAstro, fromAstro) };
+        }
+      }
+
+      default:
+        return { yf: fromYf - 1, days: 365 };
+    }
+  }
+
+  /**
+   * Calculate the actual number of days between two astronomical year fractions.
+   * This accounts for leap years and the fact that year 0 (1 BCE) exists in astronomical system.
+   */
+  private daysBetween(fromYf: number, toYf: number): number {
+    const start = Math.min(fromYf, toYf);
+    const end = Math.max(fromYf, toYf);
+
+    let totalDays = 0;
+    let y = Math.floor(start);
+
+    while (y < Math.floor(end)) {
+      totalDays += this.daysInYear(y);
+      y++;
+    }
+
+    return Math.abs(totalDays);
+  }
+
   // Reimplement the formatLabelByUnit logic here so callers can get formatted labels
   formatLabelByUnit(yf: number, unit: number): string {
     const isBCE = yf < 0;
@@ -287,12 +715,8 @@ export class TimelineDateService {
       this.isApproximatelyEqual(unit, 1 / this.MEAN_YEAR, 0.02);
 
     if (isDayTier) {
-      let dayOfYear = Math.round(frac * diy);
-      if (dayOfYear === diy) {
-        dayOfYear = 0;
-        yInt += 1;
-        diy = this.daysInYear(calYear + 1);
-      }
+      // Use floor with tiny epsilon to avoid off-by-one and duplicate day labels around boundaries
+      let dayOfYear = Math.floor(frac * diy + 1e-9);
       const md = [31, this.isLeapYear(calYear) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
       const months2 = [
         'Jan',
@@ -330,19 +754,27 @@ export class TimelineDateService {
     }
 
     if (this.isApproximatelyEqual(unit, 7 / this.MEAN_YEAR, 0.02)) {
-      const year = calYear;
-      const diyL = this.daysInYear(year);
-      let dayOfYear = Math.floor(frac * diyL);
-      dayOfYear = dayOfYear - (dayOfYear % 7);
-      return this.labelFromDayOfYear(year, dayOfYear);
+      // Anchor labels to global week boundaries (absolute 7-day cadence)
+      const idx = this.dayIndexFromYf(yf);
+      const weekStartIdx = Math.floor(idx / 7) * 7;
+      const yfWeekStart = this.yfFromDayIndex(weekStartIdx);
+      const yr = Math.floor(yfWeekStart);
+      const diy = this.daysInYear(yr);
+      const dayOfYear = Math.floor((yfWeekStart - yr) * diy);
+      return this.labelFromDayOfYear(yr, dayOfYear);
     }
 
     if (Math.abs(unit - 1 / 12) < 1e-7) {
-      let m = Math.round(frac * 12);
-      if (m === 12) {
-        m = 0;
-        yInt += 1;
-      }
+      // Derive month index from actual day-of-year to ensure consistency in BCE
+      const yr0 = Math.floor(yf);
+      const diy0 = this.daysInYear(yr0);
+      const frac0 = yf - yr0;
+      // Add tiny epsilon so exact month-boundary yfs label the new month, not the prior one
+      let dayOfYear0 = Math.floor(frac0 * diy0 + 1e-9);
+      if (dayOfYear0 < 0) dayOfYear0 = 0; // safety
+      if (dayOfYear0 >= diy0) dayOfYear0 = diy0 - 1;
+
+      const md = [31, this.isLeapYear(yr0) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
       const months = [
         'Jan',
         'Feb',
@@ -357,13 +789,19 @@ export class TimelineDateService {
         'Nov',
         'Dec',
       ];
+      let mi = 0,
+        dleft = dayOfYear0;
+      while (mi < 12) {
+        if (dleft < md[mi]) break;
+        dleft -= md[mi];
+        mi++;
+      }
+      if (mi > 11) mi = 11;
 
-      // Convert astronomical year to historical year for display
-      const astronomicalYear = isBCE ? -yInt : yInt;
-      const historicalYear = this.astronomicalToHistorical(astronomicalYear);
+      const historicalYear = this.astronomicalToHistorical(yr0);
       const absYear = Math.abs(historicalYear);
       const tail = historicalYear < 0 ? ' B.C.E.' : ' C.E.';
-      return `${months[m]} ${absYear}${tail}`;
+      return `${months[mi]} ${absYear}${tail}`;
     }
 
     if (unit >= 1) {
@@ -378,5 +816,65 @@ export class TimelineDateService {
   // small clamp helper for internal use
   private clamp(v: number, a: number, b: number) {
     return v < a ? a : v > b ? b : v;
+  }
+
+  // ---------- Absolute day indexing helpers (exact boundary stepping) ----------
+  // Cumulative days from astronomical year 0 to start of astronomical year y
+  private cumulativeDaysToYear(y: number): number {
+    if (y === 0) return 0;
+    let total = 0;
+    if (y > 0) {
+      for (let yy = 0; yy < y; yy++) total += this.daysInYear(yy);
+    } else {
+      for (let yy = -1; yy >= y; yy--) total -= this.daysInYear(yy);
+    }
+    return total;
+  }
+
+  // Convert fractional astronomical year to absolute day index (integer, start-of-day)
+  private dayIndexFromYf(yf: number): number {
+    const yr = Math.floor(yf);
+    const diy = this.daysInYear(yr);
+    const frac = yf - yr;
+    // Add tiny epsilon so exact boundary values produced by yfFromDayIndex
+    // map back to the same integer day (avoid off-by-one due to FP underflow)
+    const dayOfYear = Math.floor(frac * diy + 1e-9);
+    return this.cumulativeDaysToYear(yr) + dayOfYear;
+  }
+
+  // Convert absolute day index back to fractional astronomical year at start-of-day
+  private yfFromDayIndex(dayIndex: number): number {
+    // Find astronomical year containing this day index
+    // Walk years forward/backward; steps are small in our use (week/day stepping)
+    if (dayIndex === 0) return 0; // start of year 0
+
+    // Choose a starting guess near current year 0 and walk
+    let y = 0;
+    let cum = 0;
+    if (dayIndex > 0) {
+      while (true) {
+        const diy = this.daysInYear(y);
+        if (dayIndex < cum + diy) {
+          const dayOfYear = dayIndex - cum;
+          return y + dayOfYear / diy;
+        }
+        cum += diy;
+        y++;
+      }
+    } else {
+      // dayIndex < 0, walk backwards into negative years
+      y = -1;
+      cum = -this.daysInYear(y); // cumulative days to start of year y
+      while (true) {
+        const diy = this.daysInYear(y);
+        // For negative cum, dayIndex in [cum, cum + diy)
+        if (dayIndex >= cum) {
+          const dayOfYear = dayIndex - cum;
+          return y + dayOfYear / diy;
+        }
+        y--;
+        cum -= this.daysInYear(y);
+      }
+    }
   }
 }
