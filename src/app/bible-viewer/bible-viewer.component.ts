@@ -19,7 +19,8 @@ import {
 })
 export class BibleViewerComponent implements OnInit {
   @ViewChild('bibleContent', { read: ElementRef }) bibleContentEl?: ElementRef<HTMLElement>;
-  @ViewChild('searchResultsContainer', { read: ElementRef }) searchResultsEl?: ElementRef<HTMLElement>;
+  @ViewChild('searchResultsContainer', { read: ElementRef })
+  searchResultsEl?: ElementRef<HTMLElement>;
 
   books = signal<BibleBook[]>([]);
   selectedBook = signal<BibleBook | null>(null);
