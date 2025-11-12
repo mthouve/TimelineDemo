@@ -837,6 +837,7 @@ export class App implements AfterViewInit, OnDestroy {
       yearToY: this.yToYearDev.bind(this),
       formatLabel: this.formatLabelByUnit.bind(this),
       snapToUnit: this.snapToUnit.bind(this),
+      dateService: this.dateService,
     });
   }
 

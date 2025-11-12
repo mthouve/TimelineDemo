@@ -274,9 +274,11 @@ export class TimelineDateService {
 
     // Week tier (~7/mean year)
     if (this.isApproximatelyEqual(unit, 7 / this.MEAN_YEAR, 0.02)) {
-      // Snap to global week boundary anchored to absolute day 0 (no epsilon)
+      // Snap to start of the current week with Sunday as week start (USA convention)
       const idx = this.dayIndexFromYf(yf);
-      const weekStartIdx = Math.floor(idx / 7) * 7;
+      const w = this.weekdayFromYf(yf); // 0=Sun..6=Sat
+      const deltaToStart = (w - 0 + 7) % 7; // days since Sunday
+      const weekStartIdx = idx - deltaToStart;
       return this.yfFromDayIndex(weekStartIdx);
     }
 
@@ -383,9 +385,11 @@ export class TimelineDateService {
       }
 
       case 'Week': {
-        // Move forward to the next global week boundary (absolute 7-day blocks), no epsilon
+        // Move forward to the next week boundary with Sunday as the week start
         const idx = this.dayIndexFromYf(fromYf);
-        const weekStart = Math.floor(idx / 7) * 7;
+        const w = this.weekdayFromYf(fromYf); // 0=Sun..6=Sat
+        const deltaToStart = (w - 0 + 7) % 7;
+        const weekStart = idx - deltaToStart;
         const nextIdx = weekStart + 7;
         return { yf: this.yfFromDayIndex(nextIdx), days: 7 };
       }
@@ -548,9 +552,11 @@ export class TimelineDateService {
       }
 
       case 'Week': {
-        // Move back to the previous global week boundary (absolute 7-day blocks), no epsilon
+        // Move back to the previous week boundary with Sunday as the week start
         const idx = this.dayIndexFromYf(fromYf);
-        const weekStart = Math.floor(idx / 7) * 7;
+        const w = this.weekdayFromYf(fromYf); // 0=Sun..6=Sat
+        const deltaToStart = (w - 0 + 7) % 7;
+        const weekStart = idx - deltaToStart;
         const prevIdx = weekStart - 7;
         return { yf: this.yfFromDayIndex(prevIdx), days: 7 };
       }
@@ -702,9 +708,6 @@ export class TimelineDateService {
   // Reimplement the formatLabelByUnit logic here so callers can get formatted labels
   formatLabelByUnit(yf: number, unit: number): string {
     const isBCE = yf < 0;
-    let abs = isBCE ? -yf : yf;
-    let yInt = Math.floor(abs);
-    let frac = abs - yInt;
     const calYear = yf >= 0 ? Math.floor(yf) : Math.ceil(yf);
     let diy = this.daysInYear(calYear);
 
@@ -715,9 +718,13 @@ export class TimelineDateService {
       this.isApproximatelyEqual(unit, 1 / this.MEAN_YEAR, 0.02);
 
     if (isDayTier) {
-      // Use floor with tiny epsilon to avoid off-by-one and duplicate day labels around boundaries
-      let dayOfYear = Math.floor(frac * diy + 1e-9);
-      const md = [31, this.isLeapYear(calYear) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+      // Derive day within the correct astronomical year using floor decomposition (works for BCE too)
+      const yr = Math.floor(yf);
+      const diy0 = this.daysInYear(yr);
+      let dayOfYear = Math.floor((yf - yr) * diy0 + 1e-9);
+      if (dayOfYear < 0) dayOfYear = 0;
+      if (dayOfYear >= diy0) dayOfYear = diy0 - 1;
+      const md = [31, this.isLeapYear(yr) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
       const months2 = [
         'Jan',
         'Feb',
@@ -745,18 +752,23 @@ export class TimelineDateService {
       }
       const day = dleft + 1;
 
-      // Convert astronomical year to historical year for display
-      const astronomicalYear = isBCE ? -yInt : yInt;
-      const historicalYear = this.astronomicalToHistorical(astronomicalYear);
+      // Convert astronomical year to historical year for display using yr
+      const historicalYear = this.astronomicalToHistorical(yr);
       const absYear = Math.abs(historicalYear);
       const tail2 = historicalYear < 0 ? ' B.C.E.' : ' C.E.';
-      return `${months2[mi]} ${day}, ${absYear}${tail2}`;
+      // Compute weekday using proleptic Gregorian anchored to 1970-01-01 (Thursday)
+      const weekdayIdx = this.weekdayFromYMD(yr, mi, day);
+      const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      const weekday = weekdays[weekdayIdx];
+      return `${weekday}, ${months2[mi]} ${day}, ${absYear}${tail2}`;
     }
 
     if (this.isApproximatelyEqual(unit, 7 / this.MEAN_YEAR, 0.02)) {
-      // Anchor labels to global week boundaries (absolute 7-day cadence)
+      // Anchor labels to Sunday-start week boundaries
       const idx = this.dayIndexFromYf(yf);
-      const weekStartIdx = Math.floor(idx / 7) * 7;
+      const w = this.weekdayFromYf(yf); // 0=Sun..6=Sat
+      const deltaToStart = (w - 0 + 7) % 7;
+      const weekStartIdx = idx - deltaToStart;
       const yfWeekStart = this.yfFromDayIndex(weekStartIdx);
       const yr = Math.floor(yfWeekStart);
       const diy = this.daysInYear(yr);
@@ -818,6 +830,25 @@ export class TimelineDateService {
     return v < a ? a : v > b ? b : v;
   }
 
+  // Compute weekday index (0=Sun..6=Sat) from astronomical Y, month index (0..11), day-of-month (1..31)
+  private weekdayFromYMD(year: number, monthIndex0: number, day: number): number {
+    // Zeller's congruence for Gregorian calendar
+    let m = monthIndex0 + 1; // 1..12
+    let Y = year;
+    if (m <= 2) {
+      m += 12; // Jan/Feb as 13/14 of previous year
+      Y -= 1;
+    }
+    const q = day; // day of month
+    const K = ((Y % 100) + 100) % 100; // year of century, positive modulo
+    const J = Math.floor(Y / 100); // zero-based century (can be negative)
+    const h =
+      (q + Math.floor((13 * (m + 1)) / 5) + K + Math.floor(K / 4) + Math.floor(J / 4) + 5 * J) % 7;
+    // h: 0=Saturday, 1=Sunday, 2=Monday, ..., 6=Friday
+    const weekdaySun0 = (h + 6) % 7; // convert to 0=Sun..6=Sat
+    return weekdaySun0;
+  }
+
   // ---------- Absolute day indexing helpers (exact boundary stepping) ----------
   // Cumulative days from astronomical year 0 to start of astronomical year y
   private cumulativeDaysToYear(y: number): number {
@@ -876,5 +907,26 @@ export class TimelineDateService {
         cum -= this.daysInYear(y);
       }
     }
+  }
+
+  // Compute weekday (0=Sun..6=Sat) directly from a year fraction
+  private weekdayFromYf(yf: number): number {
+    const yr = Math.floor(yf);
+    const diy = this.daysInYear(yr);
+    // Add tiny epsilon to stabilize exact-boundary values
+    let dayOfYear = Math.floor((yf - yr) * diy + 1e-9);
+    if (dayOfYear < 0) dayOfYear = 0;
+    if (dayOfYear >= diy) dayOfYear = diy - 1;
+    const feb = diy === 366 ? 29 : 28;
+    const md = [31, feb, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let mi = 0,
+      dleft = dayOfYear;
+    while (mi < 12 && dleft >= md[mi]) {
+      dleft -= md[mi];
+      mi++;
+    }
+    if (mi > 11) mi = 11;
+    const day = dleft + 1;
+    return this.weekdayFromYMD(yr, mi, day);
   }
 }

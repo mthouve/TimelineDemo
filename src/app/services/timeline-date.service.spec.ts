@@ -412,6 +412,76 @@ describe('TimelineDateService', () => {
     });
   });
 
+  describe('Day label monotonicity across BCE/CE boundary', () => {
+    function parseDayLabel(
+      label: string,
+      svc: TimelineDateService
+    ): { aYear: number; day0: number } {
+      // Example: "Wed, Dec 30, 1 B.C.E." or "Thu, Jan 1, 1 C.E."
+      const m = label.match(
+        /^([A-Za-z]{3}),\s+([A-Za-z]{3})\s+(\d+),\s+(\d+)\s+(B\.C\.E\.|C\.E\.)$/
+      );
+      if (!m) {
+        throw new Error(`Unparsable day label: ${label}`);
+      }
+      const monthStr = m[2];
+      const day = parseInt(m[3], 10);
+      const yearAbs = parseInt(m[4], 10);
+      const era = m[5];
+      const months = [
+        'Jan',
+        'Feb',
+        'Mar',
+        'Apr',
+        'May',
+        'Jun',
+        'Jul',
+        'Aug',
+        'Sep',
+        'Oct',
+        'Nov',
+        'Dec',
+      ];
+      const mi = months.indexOf(monthStr);
+      const histYear = era.startsWith('B') ? -yearAbs : yearAbs;
+      const astroYear = svc.historicalToAstronomical(histYear);
+      const diy = svc.daysInYear(astroYear);
+      const feb = diy === 366 ? 29 : 28;
+      const md = [31, feb, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+      let cum = 0;
+      for (let i = 0; i < mi; i++) cum += md[i];
+      const day0 = cum + (day - 1);
+      return { aYear: astroYear, day0 };
+    }
+
+    it('Day labels move forward across 1 B.C.E. → 1 C.E.', () => {
+      const dayUnit = 1 / service.meanYear;
+      const yr = 0; // 1 B.C.E. (astronomical 0)
+      const diy = service.daysInYear(yr); // 366
+      // Start 5 days before end of 1 B.C.E. and step forward across into 1 C.E.
+      let current = yr + (diy - 5) / diy;
+
+      const ordinals: Array<{ aYear: number; day0: number; label: string }> = [];
+      for (let i = 0; i < 12; i++) {
+        const label = service.formatLabelByUnit(current, dayUnit);
+        const ord = parseDayLabel(label, service);
+        ordinals.push({ ...ord, label });
+        current = service.nextDate(current, 'Day').yf;
+      }
+
+      for (let i = 1; i < ordinals.length; i++) {
+        const prev = ordinals[i - 1];
+        const cur = ordinals[i];
+        const nonDecreasing =
+          cur.aYear > prev.aYear || (cur.aYear === prev.aYear && cur.day0 > prev.day0);
+        if (!nonDecreasing) {
+          fail(`Day label moved backwards at step ${i}: '${prev.label}' -> '${cur.label}'`);
+        }
+        expect(nonDecreasing).toBeTrue();
+      }
+    });
+  });
+
   describe('Leap Year Handling', () => {
     it('should recognize 1 BCE (year 0) as a leap year', () => {
       expect(service.daysInYear(0)).toBe(366);

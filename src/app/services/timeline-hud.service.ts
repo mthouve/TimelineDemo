@@ -21,6 +21,7 @@ export interface DrawCenterlineParams {
   yearToY: (y: number) => number;
   formatLabel: (year: number, unit: number) => string;
   snapToUnit: (year: number, unit: number) => number;
+  dateService: any;
 }
 
 export interface DrawHudLayerParams {
@@ -95,101 +96,78 @@ export class TimelineHudService {
       canvasHeight: Hc,
       dpr,
       screenWidth,
+      unitYears,
       zoomLevelName,
       yearToY,
       yToYearDev,
       nowYearFraction,
       formatLabelByUnit,
-      unitYears: u,
       dateService,
     } = params;
-
-    ctx.clearRect(0, 0, Wc, Hc);
 
     const thick = Math.max(1, Math.round(this.grid.thicknessCSS * dpr));
     const segLen = Math.max(2, Math.round((screenWidth || Wc) * 0.1 * dpr));
     const x0 = Math.round((Wc - segLen) / 2);
-
-    ctx.font = `${Math.max(11, Math.round(13 * dpr))}px system-ui, sans-serif`;
-    ctx.textBaseline = 'middle';
-    ctx.textAlign = 'right';
     const labelMargin = Math.round(6 * dpr);
 
+    // Ensure readable label size on HiDPI canvases (match centerline and today label)
+    ctx.font = `${Math.max(11, Math.round(13 * dpr))}px system-ui, sans-serif`;
     const yTopYear = yToYearDev(0);
     const yBotYear = yToYearDev(Hc);
 
-    // Find the first HUD line position
-    // Start slightly before the visible area to ensure we catch the first tick
+    // Find first visible boundary by snapping the top to the unit
     let yTick: number;
+    try {
+      yTick = dateService.snapToUnit(yTopYear, unitYears);
+    } catch {
+      yTick = yTopYear;
+    }
 
-    // Find first boundary by walking forward from a safe point before the viewport.
-    // This guarantees we start exactly on a real boundary for all units.
-    let cursor = Math.floor(yTopYear) - 2; // start a bit above
-    let boundary = dateService.nextDate(cursor, zoomLevelName);
-    // Guard against non-advancing nextDate to avoid infinite loops
+    // Advance until we reach the top of the viewport
     let guard = 0;
-    const GUARD_MAX = 5000;
-    let prev = Number.NEGATIVE_INFINITY;
-    while (boundary.yf < yTopYear - 1e-9 && guard++ < GUARD_MAX) {
-      const next = dateService.nextDate(boundary.yf, zoomLevelName);
-      // If no progress, break to avoid freeze
-      if (!(next.yf > boundary.yf + 1e-12)) break;
-      prev = boundary.yf;
-      boundary = next;
-    }
-    // If we failed to reach the first visible boundary due to non-advancing step,
-    // fall back to snapping the top to a valid boundary to ensure we draw something.
-    if (boundary.yf < yTopYear - 1e-9) {
-      try {
-        yTick = dateService.snapToUnit(yTopYear, u);
-      } catch {
-        yTick = yTopYear; // last resort
-      }
-    } else {
-      yTick = boundary.yf;
+    while (yTick < yTopYear - 1e-9 && guard++ < 10000) {
+      const next = dateService.nextDate(yTick, zoomLevelName);
+      if (!(next.yf > yTick + 1e-12)) break; // guard against non-advancing
+      yTick = next.yf;
     }
 
-    // Now navigate forward through all visible dates
+    // Draw all visible ticks
     let safety = 0;
-    const maxTicks = 15000;
-
+    const maxTicks = 20000;
     while (yTick <= yBotYear + 1e-7 && safety++ < maxTicks) {
       if (yTick >= yTopYear - 1e-9) {
-        // Use yTick directly for drawing; it already represents the exact boundary
-        // from nextDate (no epsilon)
         const yPx = yearToY(yTick);
         ctx.fillStyle = this.grid.color;
         ctx.fillRect(x0, Math.round(yPx - Math.floor(thick / 2)), segLen, thick);
 
-        const label = formatLabelByUnit(yTick, u);
+        const label = formatLabelByUnit(yTick, unitYears);
         if (label) {
           ctx.fillStyle = 'rgba(255,170,80,0.95)';
+          ctx.textAlign = 'right';
+          ctx.textBaseline = 'middle';
           ctx.fillText(label, x0 - labelMargin, Math.round(yPx));
         }
       }
 
-      // Move to next date boundary
       const next = dateService.nextDate(yTick, zoomLevelName);
+      if (!(next.yf > yTick + 1e-12)) break;
       yTick = next.yf;
     }
 
-    // Today marker
-    const yToday = Math.round(yearToY(nowYearFraction()));
+    // Today marker (red)
+    const nowYF = nowYearFraction();
+    const yToday = Math.round(yearToY(nowYF));
     if (yToday >= -4 && yToday <= Hc + 4) {
       const ySeg = yToday - Math.floor(thick / 2);
       ctx.save();
       ctx.fillStyle = 'rgba(255,70,70,0.9)';
       ctx.fillRect(x0, ySeg, segLen, thick);
 
-      // Today's date label
-      const d = new Date();
-      const todayLabel = `${params.getMonthName(
-        d.getUTCMonth()
-      )} ${d.getUTCDate()}, ${d.getUTCFullYear()} C.E.`;
+      const dayUnit = 1 / params.dateService.meanYear;
+      const todayLabel = formatLabelByUnit(nowYF, dayUnit);
       ctx.textAlign = 'right';
       ctx.fillStyle = 'rgba(255,70,70,0.95)';
       ctx.fillText(todayLabel, x0 - labelMargin, Math.round(yToday));
-
       ctx.restore();
     }
   }
@@ -218,7 +196,10 @@ export class TimelineHudService {
     const unit = this.huds[currentZoomIdx]?.unit ?? 1;
 
     const yfCenter = yearToY(canvasHeight / 2);
-    let snapped = snapToUnit(yfCenter, unit);
+    const snappedDown = snapToUnit(yfCenter, unit);
+    // For all tiers (Day/Week/Month), keep labeling the current period until the boundary is crossed.
+    // We intentionally avoid switching at midpoint to prevent premature announcements.
+    let snapped = snappedDown;
 
     if (scrollMin != null && scrollMax != null) {
       const THRESH = 1;
