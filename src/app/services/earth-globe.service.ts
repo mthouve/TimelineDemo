@@ -58,10 +58,10 @@ export class EarthGlobeService {
     this.renderer.setClearColor(0x000000, 0); // Transparent background
 
     // Lighting
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.1);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.06); // lower ambient to keep nights dark
     this.scene.add(ambientLight);
 
-    this.sunLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    this.sunLight = new THREE.DirectionalLight(0xffffff, 1.35); // brighter sun for stronger day-side
     this.sunLight.position.set(5, 3, 5);
     this.scene.add(this.sunLight);
 
@@ -83,10 +83,16 @@ export class EarthGlobeService {
         // Build an initial water mask from the original color source before grayscaling
         const sourceImg = texture.image as HTMLImageElement;
         const initialMask = this.createWaterMaskFromSource(sourceImg);
+        // Apply to both specular lobes with dimmer defaults
         this.waterMaterial.alphaMap = initialMask;
         this.waterMaterial.specularMap = initialMask;
-        this.waterMaterial.opacity = 1.0;
+        this.waterMaterial.opacity = 0.22; // narrow lobe
         this.waterMaterial.needsUpdate = true;
+
+        this.waterMaterialWide.alphaMap = initialMask;
+        this.waterMaterialWide.specularMap = initialMask;
+        this.waterMaterialWide.opacity = 0.06; // broad lobe (very subtle)
+        this.waterMaterialWide.needsUpdate = true;
 
         // Convert texture to grayscale for the base material
         this.applyGrayscaleFilter(texture);
@@ -115,8 +121,9 @@ export class EarthGlobeService {
     this.waterMaterial = new THREE.MeshPhongMaterial({
       color: 0x000000, // no diffuse contribution; only specular will show
       transparent: true,
-      specular: new THREE.Color(0xff9642), // orange glint
-      shininess: 50, // tighter/brighter highlight
+      // Dimmer, smaller highlight
+      specular: new THREE.Color(0x663814), // darker orange glint
+      shininess: 160, // much tighter (smaller) highlight
       blending: THREE.AdditiveBlending, // add highlight over base
       depthWrite: false,
       opacity: 0.0, // hidden until water mask loads
@@ -124,12 +131,12 @@ export class EarthGlobeService {
     this.waterMesh = new THREE.Mesh(this.earthGeometry, this.waterMaterial);
     this.earthGroup.add(this.waterMesh);
 
-    // Broader secondary lobe for more natural highlight rolloff
+    // Broader secondary lobe for more natural highlight rolloff (very subtle)
     this.waterMaterialWide = new THREE.MeshPhongMaterial({
       color: 0x000000,
       transparent: true,
-      specular: new THREE.Color(0x8a4d20), // dimmer orange
-      shininess: 18, // broad lobe
+      specular: new THREE.Color(0x3d220e), // very dim orange
+      shininess: 24, // still broad, but subtle
       blending: THREE.AdditiveBlending,
       depthWrite: false,
       opacity: 0.0,
@@ -248,7 +255,7 @@ export class EarthGlobeService {
       this.waterMaterial.alphaMap = waterMask;
       this.waterMaterial.specularMap = waterMask;
       this.waterMaterial.transparent = true;
-      this.waterMaterial.opacity = 1.0;
+      this.waterMaterial.opacity = 0.22; // narrow lobe dimmer
       this.waterMaterial.needsUpdate = true;
       // Ensure correct encoding and update for mask textures
       waterMask.needsUpdate = true;
@@ -256,7 +263,7 @@ export class EarthGlobeService {
       this.waterMaterialWide.alphaMap = waterMask;
       this.waterMaterialWide.specularMap = waterMask;
       this.waterMaterialWide.transparent = true;
-      this.waterMaterialWide.opacity = 1.0;
+      this.waterMaterialWide.opacity = 0.06; // broad lobe very subtle
       this.waterMaterialWide.needsUpdate = true;
     };
 
