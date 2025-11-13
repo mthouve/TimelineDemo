@@ -9,6 +9,7 @@ export class EarthGlobeService {
   private camera!: THREE.PerspectiveCamera;
   private renderer!: THREE.WebGLRenderer;
   private earthGroup!: THREE.Group;
+  private sunLight!: THREE.DirectionalLight;
   private earthGeometry!: THREE.SphereGeometry;
   private baseMaterial!: THREE.MeshPhongMaterial;
   private waterMaterial!: THREE.MeshPhongMaterial;
@@ -16,6 +17,8 @@ export class EarthGlobeService {
   private baseMesh!: THREE.Mesh;
   private waterMesh!: THREE.Mesh;
   private waterMeshWide!: THREE.Mesh;
+  private atmosphereMesh!: THREE.Mesh;
+  private atmosphereMaterial!: THREE.ShaderMaterial;
   private animationFrameId: number | null = null;
   private locationMarker: THREE.Sprite | null = null;
   private currentMarkerPosition: { lat: number; lon: number } | null = null;
@@ -58,9 +61,9 @@ export class EarthGlobeService {
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.1);
     this.scene.add(ambientLight);
 
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    directionalLight.position.set(5, 3, 5);
-    this.scene.add(directionalLight);
+    this.sunLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    this.sunLight.position.set(5, 3, 5);
+    this.scene.add(this.sunLight);
 
     // Earth sphere
     const geometry = new THREE.SphereGeometry(1, 64, 64);
@@ -133,6 +136,89 @@ export class EarthGlobeService {
     });
     this.waterMeshWide = new THREE.Mesh(this.earthGeometry, this.waterMaterialWide);
     this.earthGroup.add(this.waterMeshWide);
+
+    // Subtle atmospheric halo (additive rim glow)
+    const glowColor = new THREE.Color(0xff9642);
+    this.atmosphereMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        glowColor: { value: new THREE.Vector3(glowColor.r, glowColor.g, glowColor.b) },
+        intensity: { value: 0.5 }, // boosted for visibility
+        power: { value: 2.0 }, // softer falloff
+        rimStart: { value: 0.0 }, // start immediately at surface (no gap)
+        rimEnd: { value: 0.99 }, // end of rim (near silhouette)
+        outerStart: { value: 0.92 }, // begin softening the outer border
+        outerEnd: { value: 1.0 }, // fully faded at 1.0
+        sunDir: { value: new THREE.Vector3(0, 0, 1) }, // filled each frame from directional light
+        dayPower: { value: 1.2 },
+        minDay: { value: 0.05 }, // much lower to create stronger day/night contrast
+      },
+      vertexShader: `
+        varying vec3 vWorldPosition;
+        varying vec3 vNormal;
+        void main() {
+          vNormal = normalize(normalMatrix * normal);
+          vec4 worldPos = modelMatrix * vec4(position, 1.0);
+          vWorldPosition = worldPos.xyz;
+          gl_Position = projectionMatrix * viewMatrix * worldPos;
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 glowColor;
+        uniform float intensity;
+        uniform float power;
+        uniform float rimStart;
+        uniform float rimEnd;
+        uniform float outerStart;
+        uniform float outerEnd;
+  uniform vec3 sunDir;
+  uniform float dayPower;
+  uniform float minDay;
+        varying vec3 vWorldPosition;
+        varying vec3 vNormal;
+        void main() {
+          vec3 viewDir = normalize(cameraPosition - vWorldPosition);
+          // For BackSide, flip the normal so it points outward
+          vec3 n = normalize(-vNormal);
+          float rim = 1.0 - dot(viewDir, n);
+          rim = clamp(rim, 0.0, 1.0);
+          
+          // For atmospheric glow: brightest near surface, fades with altitude
+          // rim = 0.0 at center (looking straight at surface)
+          // rim = 1.0 at silhouette edge (90 degrees)
+          // We want glow to be visible throughout but fade toward space
+          
+          // Start with base visibility across the whole shell
+          float density = 1.0;
+          
+          // Fade out as we approach the outer edge (space)
+          // Only fade at high rim values (near silhouette)
+          float altitudeFade = 1.0 - smoothstep(0.5, 1.0, rim);
+          density *= altitudeFade;
+          
+          // Apply gentle power curve for smooth falloff
+          density = pow(density, power * 0.5);
+          
+          // Day/night modulation: brightest where atmosphere is illuminated by sun
+          vec3 sunDirNorm = normalize(sunDir);
+          float sunDot = dot(n, sunDirNorm);
+          
+          float dayFactor = clamp(sunDot, 0.0, 1.0);
+          dayFactor = pow(dayFactor, dayPower);
+          dayFactor = mix(minDay, 1.0, dayFactor);
+          
+          float alpha = intensity * density * dayFactor;
+          gl_FragColor = vec4(glowColor * alpha, alpha);
+        }
+      `,
+      side: THREE.BackSide,
+      blending: THREE.AdditiveBlending,
+      transparent: true,
+      depthWrite: false,
+    });
+    this.atmosphereMesh = new THREE.Mesh(this.earthGeometry, this.atmosphereMaterial);
+    this.atmosphereMesh.scale.setScalar(1.06); // larger shell for visible glow
+    this.atmosphereMesh.renderOrder = 1; // render after Earth
+    this.earthGroup.add(this.atmosphereMesh);
 
     this.scene.add(this.earthGroup);
 
@@ -376,6 +462,24 @@ export class EarthGlobeService {
   private animate = (): void => {
     this.animationFrameId = requestAnimationFrame(this.animate);
 
+    // Update atmosphere sun direction uniform each frame
+    if (this.atmosphereMaterial && this.sunLight) {
+      const sunPos = new THREE.Vector3();
+      this.sunLight.getWorldPosition(sunPos);
+      // NEGATED: We need the direction FROM sun TO earth, not earth TO sun
+      // This makes the dot product work correctly with the outward normals
+      const sunDirection = sunPos.clone().normalize().negate();
+      if (this.atmosphereMaterial.uniforms['sunDir']) {
+        (this.atmosphereMaterial.uniforms['sunDir'].value as THREE.Vector3).copy(sunDirection);
+      }
+      // Debug: log once to verify
+      if (!this.atmosphereMaterial.userData['debugLogged']) {
+        console.log('Sun position:', sunPos);
+        console.log('Sun direction (negated, normalized):', sunDirection);
+        this.atmosphereMaterial.userData['debugLogged'] = true;
+      }
+    }
+
     // Handle rotation animation
     if (this.rotationAnimation?.active) {
       const now = performance.now();
@@ -616,6 +720,21 @@ export class EarthGlobeService {
     this.renderer.setSize(width, height);
   }
 
+  /** Toggle the atmospheric halo on/off */
+  setAtmosphereEnabled(enabled: boolean): void {
+    if (!this.atmosphereMesh) return;
+    this.atmosphereMesh.visible = enabled;
+  }
+
+  /** Adjust atmospheric halo intensity at runtime (0..1 recommended) */
+  setAtmosphereIntensity(value: number): void {
+    if (!this.atmosphereMaterial) return;
+    const v = Math.max(0, Math.min(1, value));
+    if (this.atmosphereMaterial.uniforms && this.atmosphereMaterial.uniforms['intensity']) {
+      this.atmosphereMaterial.uniforms['intensity'].value = v;
+    }
+  }
+
   /**
    * Clean up resources
    */
@@ -635,5 +754,6 @@ export class EarthGlobeService {
     if (this.baseMaterial) this.baseMaterial.dispose();
     if (this.waterMaterial) this.waterMaterial.dispose();
     if (this.waterMaterialWide) this.waterMaterialWide.dispose();
+    if (this.atmosphereMaterial) this.atmosphereMaterial.dispose();
   }
 }
