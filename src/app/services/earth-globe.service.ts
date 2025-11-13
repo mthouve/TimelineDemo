@@ -144,23 +144,24 @@ export class EarthGlobeService {
       const progress = Math.min(elapsed / this.rotationAnimation.duration, 1);
 
       // Ease in-out cubic
-      const eased = progress < 0.5
-        ? 4 * progress * progress * progress
-        : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+      const eased =
+        progress < 0.5
+          ? 4 * progress * progress * progress
+          : 1 - Math.pow(-2 * progress + 2, 3) / 2;
 
       // Interpolate rotation
-      this.earthMesh.rotation.x = 
-        this.rotationAnimation.startRotation.x + 
+      this.earthMesh.rotation.x =
+        this.rotationAnimation.startRotation.x +
         (this.rotationAnimation.targetRotation.x - this.rotationAnimation.startRotation.x) * eased;
-      
-      this.earthMesh.rotation.y = 
-        this.rotationAnimation.startRotation.y + 
+
+      this.earthMesh.rotation.y =
+        this.rotationAnimation.startRotation.y +
         (this.rotationAnimation.targetRotation.y - this.rotationAnimation.startRotation.y) * eased;
 
       if (progress >= 1) {
         this.rotationAnimation.active = false;
       }
-      
+
       // Update marker position to match Earth rotation
       if (this.locationMarker && this.currentMarkerPosition) {
         this.updateMarkerPosition();
@@ -168,7 +169,7 @@ export class EarthGlobeService {
     } else {
       // Slow idle rotation when not animating to a target
       this.earthMesh.rotation.y += 0.001;
-      
+
       // Update marker position during idle rotation too
       if (this.locationMarker && this.currentMarkerPosition) {
         this.updateMarkerPosition();
@@ -233,24 +234,25 @@ export class EarthGlobeService {
     // Clear canvas
     ctx.clearRect(0, 0, 128, 128);
 
-    // Outer glow (faint red) - thinner and more transparent
-    const gradient = ctx.createRadialGradient(64, 64, 15, 64, 64, 28);
-    gradient.addColorStop(0, 'rgba(255, 0, 0, 0.3)');
-    gradient.addColorStop(0.6, 'rgba(255, 0, 0, 0.15)');
-    gradient.addColorStop(1, 'rgba(255, 0, 0, 0)');
+    // Outer glow (faint red) - adjust for larger dot (2x diameter)
+    // Dot radius -> 30; keep a thin halo of ~13px thickness: outer radius ~43
+    const gradient = ctx.createRadialGradient(64, 64, 30, 64, 64, 43);
+    gradient.addColorStop(0, 'rgba(200, 0, 0, 0.3)');
+    gradient.addColorStop(0.6, 'rgba(200, 0, 0, 0.15)');
+    gradient.addColorStop(1, 'rgba(200, 0, 0, 0)');
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, 128, 128);
 
-    // Solid red circle (pure red, fully opaque)
-    ctx.fillStyle = 'rgb(255, 0, 0)';
+    // Solid red circle (darker red, fully opaque) - doubled radius
+    ctx.fillStyle = 'rgb(200, 0, 0)';
     ctx.beginPath();
-    ctx.arc(64, 64, 15, 0, Math.PI * 2);
+    ctx.arc(64, 64, 30, 0, Math.PI * 2);
     ctx.fill();
 
     // Create sprite from canvas
     const texture = new THREE.CanvasTexture(canvas);
-    const material = new THREE.SpriteMaterial({ 
-      map: texture, 
+    const material = new THREE.SpriteMaterial({
+      map: texture,
       transparent: true,
       depthTest: false,
       depthWrite: false,
@@ -258,11 +260,11 @@ export class EarthGlobeService {
       blending: THREE.NormalBlending, // Ensure normal blending, not affected by lighting
     });
     this.locationMarker = new THREE.Sprite(material);
-    this.locationMarker.scale.set(0.10, 0.10, 1); // Small, like a timeline point
+    this.locationMarker.scale.set(0.1, 0.1, 1); // Small, like a timeline point
 
     // Position marker - will be updated in world space during animation
     this.updateMarkerPosition();
-    
+
     // Add to scene (not as child of Earth) to avoid orange tint
     this.scene.add(this.locationMarker);
   }
@@ -279,33 +281,35 @@ export class EarthGlobeService {
     // Calculate position in Earth's local space
     const latRad = THREE.MathUtils.degToRad(lat);
     const lonRad = THREE.MathUtils.degToRad(lon + 90); // Add 90 to compensate for texture offset
-    
+
     const localX = radius * Math.cos(latRad) * Math.sin(lonRad);
     const localY = radius * Math.sin(latRad);
     const localZ = radius * Math.cos(latRad) * Math.cos(lonRad);
-    
+
     // Convert to world space using Earth's rotation
     const localPos = new THREE.Vector3(localX, localY, localZ);
     localPos.applyEuler(this.earthMesh.rotation);
-    
+
     this.locationMarker.position.copy(localPos);
-    
+
     // Calculate visibility based on whether marker is facing the camera
     // Simple approach: check if the surface normal at marker position points toward camera
     const markerNormal = localPos.clone().normalize(); // Normal points outward from Earth center
-    const cameraDirection = new THREE.Vector3().subVectors(this.camera.position, localPos).normalize();
-    
+    const cameraDirection = new THREE.Vector3()
+      .subVectors(this.camera.position, localPos)
+      .normalize();
+
     // Dot product between normal and camera direction
     // > 0 means facing camera (visible)
     // < 0 means facing away (behind Earth)
     const facingCamera = markerNormal.dot(cameraDirection);
-    
+
     // Create smooth transition
     // Full visibility when facingCamera > 0.2
     // Fade out between 0.2 and -0.2
     // Very dim when facingCamera < -0.2
     let visibilityFactor = 1.0;
-    
+
     if (facingCamera < 0.2) {
       if (facingCamera > -0.2) {
         // In transition zone
@@ -315,14 +319,15 @@ export class EarthGlobeService {
         visibilityFactor = 0.0;
       }
     }
-    
+
     // Store the base opacity if we haven't already (for first frame)
     if (this.locationMarker.userData['baseOpacity'] === undefined) {
       this.locationMarker.userData['baseOpacity'] = 1.0;
     }
-    
+
     // Apply visibility masking while preserving the fade effect from setMarkerOpacity
-    this.locationMarker.material.opacity = this.locationMarker.userData['baseOpacity'] * visibilityFactor;
+    this.locationMarker.material.opacity =
+      this.locationMarker.userData['baseOpacity'] * visibilityFactor;
   }
 
   /**

@@ -99,7 +99,7 @@ export class App implements AfterViewInit, OnDestroy {
     const secondaryRange = this.TL.unitYears * 2.0; // within 2 HUD spacings
 
     const nearbyEntries: InfoBoxEntry[] = [];
-    let closestPrimaryWithLocation: typeof entries[0] | null = null;
+    let closestPrimaryWithLocation: (typeof entries)[0] | null = null;
     let closestDistance = Infinity;
 
     for (const e of entries) {
@@ -125,7 +125,7 @@ export class App implements AfterViewInit, OnDestroy {
         closestPrimaryWithLocation.location.lon,
         closestPrimaryWithLocation.location.lat
       );
-      
+
       // Calculate marker opacity based on distance (fade out over 2x primary range)
       const fadeRange = primaryRange * 2.0;
       const opacity = 1.0 - Math.min(closestDistance / fadeRange, 1.0);
@@ -660,17 +660,23 @@ export class App implements AfterViewInit, OnDestroy {
   }
 
   private getEntries() {
-    const out: { label: string; when: string; yf: number; yearOnly: boolean; location?: { lat: number; lon: number; name?: string } }[] = [];
+    const out: {
+      label: string;
+      when: string;
+      yf: number;
+      yearOnly: boolean;
+      location?: { lat: number; lon: number; name?: string };
+    }[] = [];
     for (const key of Object.keys(this.TIMELINE_POINTS)) {
       const point = this.TIMELINE_POINTS[key];
       const { yf, yearOnly } = this.yearParseWithFlag(key);
       if (!isNaN(yf)) {
-        out.push({ 
-          label: key, 
-          when: point.description, 
-          yf, 
+        out.push({
+          label: key,
+          when: point.description,
+          yf,
           yearOnly,
-          location: point.location 
+          location: point.location,
         });
       }
     }
