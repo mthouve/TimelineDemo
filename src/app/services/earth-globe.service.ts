@@ -55,10 +55,10 @@ export class EarthGlobeService {
     this.renderer.setClearColor(0x000000, 0); // Transparent background
 
     // Lighting
-  const ambientLight = new THREE.AmbientLight(0xffffff, 0.1);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.1);
     this.scene.add(ambientLight);
 
-  const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
     directionalLight.position.set(5, 3, 5);
     this.scene.add(directionalLight);
 
@@ -139,7 +139,7 @@ export class EarthGlobeService {
     console.log('Earth mesh created and added to scene');
 
     // Try to load bathymetry as a water mask for specular (sun reflection on water)
-  this.loadWaterSpecularMask(textureLoader);
+    this.loadWaterSpecularMask(textureLoader);
 
     // Start render loop
     this.animate();
@@ -406,8 +406,8 @@ export class EarthGlobeService {
         this.updateMarkerPosition();
       }
     } else {
-  // Slow idle rotation when not animating to a target (halved speed)
-  this.earthGroup.rotation.y += 0.0005;
+      // Slow idle rotation when not animating to a target (halved speed)
+      this.earthGroup.rotation.y += 0.0005;
       // Keep angle bounded to avoid very large values over time
       this.earthGroup.rotation.y = Math.atan2(
         Math.sin(this.earthGroup.rotation.y),
@@ -442,7 +442,7 @@ export class EarthGlobeService {
    * @param duration Animation duration in milliseconds (default: 2000)
    */
   rotateTo(lon: number, lat: number, duration: number = 2000): void {
-  if (!this.earthGroup) return;
+    if (!this.earthGroup) return;
 
     // Convert to radians
     // Y rotation: negative longitude brings location to front
@@ -451,8 +451,8 @@ export class EarthGlobeService {
     const targetLatRad = THREE.MathUtils.degToRad(lat);
 
     // Compute shortest angular difference so we never spin more than necessary
-  const currentY = this.earthGroup.rotation.y;
-  const currentX = this.earthGroup.rotation.x;
+    const currentY = this.earthGroup.rotation.y;
+    const currentX = this.earthGroup.rotation.x;
     const deltaY = this.shortestAngleDelta(currentY, targetLonRad);
     const deltaX = this.shortestAngleDelta(currentX, targetLatRad);
     const resolvedTargetY = currentY + deltaY; // at most PI in magnitude
@@ -552,7 +552,7 @@ export class EarthGlobeService {
 
     // Convert to world space using Earth's rotation
     const localPos = new THREE.Vector3(localX, localY, localZ);
-  localPos.applyEuler(this.earthGroup.rotation);
+    localPos.applyEuler(this.earthGroup.rotation);
 
     this.locationMarker.position.copy(localPos);
 
