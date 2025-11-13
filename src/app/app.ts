@@ -16,6 +16,7 @@ import { SettingsControlComponent } from './settings-control/settings-control.co
 import { InfoBoxComponent, InfoBoxEntry } from './info-box/info-box.component';
 import { BibleViewerComponent } from './bible-viewer/bible-viewer.component';
 import { CommonModule } from '@angular/common';
+import { TimelinePoint } from './data/timeline-points';
 
 // Animation envelope (typed)
 type ZoomAnim = {
@@ -98,14 +99,40 @@ export class App implements AfterViewInit, OnDestroy {
     const secondaryRange = this.TL.unitYears * 2.0; // within 2 HUD spacings
 
     const nearbyEntries: InfoBoxEntry[] = [];
+    let closestPrimaryWithLocation: typeof entries[0] | null = null;
+    let closestDistance = Infinity;
+
     for (const e of entries) {
       const dy = Math.abs(e.yf - centerYF);
       if (dy <= secondaryRange) {
+        const isPrimary = dy <= primaryRange;
         nearbyEntries.push({
           ...e,
-          isPrimary: dy <= primaryRange,
+          isPrimary,
         });
+
+        // Track closest primary entry with location for Earth rotation
+        if (isPrimary && e.location && dy < closestDistance) {
+          closestPrimaryWithLocation = e;
+          closestDistance = dy;
+        }
       }
+    }
+
+    // Rotate Earth to show location if we have a primary entry with coordinates
+    if (closestPrimaryWithLocation?.location) {
+      this.earthGlobe.rotateTo(
+        closestPrimaryWithLocation.location.lon,
+        closestPrimaryWithLocation.location.lat
+      );
+      
+      // Calculate marker opacity based on distance (fade out over 2x primary range)
+      const fadeRange = primaryRange * 2.0;
+      const opacity = 1.0 - Math.min(closestDistance / fadeRange, 1.0);
+      this.earthGlobe.setMarkerOpacity(opacity);
+    } else {
+      // No location in view, hide marker
+      this.earthGlobe.setMarkerOpacity(0);
     }
 
     // Already in chronological order, just limit total count
@@ -177,7 +204,7 @@ export class App implements AfterViewInit, OnDestroy {
   }> = [];
 
   // ── Data ──────────────────────────────────────────────────────────────────────
-  private TIMELINE_POINTS: Record<string, string>;
+  private TIMELINE_POINTS: Record<string, TimelinePoint>;
 
   // ── Sizing ────────────────────────────────────────────────────────────────────
   private dpr = Math.max(1, window.devicePixelRatio || 1);
@@ -633,11 +660,19 @@ export class App implements AfterViewInit, OnDestroy {
   }
 
   private getEntries() {
-    const out: { label: string; when: string; yf: number; yearOnly: boolean }[] = [];
+    const out: { label: string; when: string; yf: number; yearOnly: boolean; location?: { lat: number; lon: number; name?: string } }[] = [];
     for (const key of Object.keys(this.TIMELINE_POINTS)) {
-      const when = this.TIMELINE_POINTS[key];
+      const point = this.TIMELINE_POINTS[key];
       const { yf, yearOnly } = this.yearParseWithFlag(key);
-      if (!isNaN(yf)) out.push({ label: key, when, yf, yearOnly });
+      if (!isNaN(yf)) {
+        out.push({ 
+          label: key, 
+          when: point.description, 
+          yf, 
+          yearOnly,
+          location: point.location 
+        });
+      }
     }
     out.sort((a, b) => a.yf - b.yf);
     return out;

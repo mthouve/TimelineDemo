@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { TIMELINE_POINTS } from '../data/timeline-points';
+import { TIMELINE_POINTS, TimelinePoint } from '../data/timeline-points';
 
 export type ZoomSpec = {
   id: string;
@@ -37,7 +37,7 @@ export class TimelineDateService {
     return this.zoomLabels;
   }
 
-  getTimelinePoints(): Record<string, string> {
+  getTimelinePoints(): Record<string, TimelinePoint> {
     return TIMELINE_POINTS;
   }
 

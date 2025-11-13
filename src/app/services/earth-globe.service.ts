@@ -10,6 +10,17 @@ export class EarthGlobeService {
   private renderer!: THREE.WebGLRenderer;
   private earthMesh!: THREE.Mesh;
   private animationFrameId: number | null = null;
+  private locationMarker: THREE.Sprite | null = null;
+  private currentMarkerPosition: { lat: number; lon: number } | null = null;
+
+  // Rotation animation state
+  private rotationAnimation: {
+    active: boolean;
+    startTime: number;
+    duration: number;
+    startRotation: { x: number; y: number };
+    targetRotation: { x: number; y: number };
+  } | null = null;
 
   constructor() {}
 
@@ -126,27 +137,203 @@ export class EarthGlobeService {
   private animate = (): void => {
     this.animationFrameId = requestAnimationFrame(this.animate);
 
-    // Slow rotation for visual interest
-    this.earthMesh.rotation.y += 0.001;
+    // Handle rotation animation
+    if (this.rotationAnimation?.active) {
+      const now = performance.now();
+      const elapsed = now - this.rotationAnimation.startTime;
+      const progress = Math.min(elapsed / this.rotationAnimation.duration, 1);
+
+      // Ease in-out cubic
+      const eased = progress < 0.5
+        ? 4 * progress * progress * progress
+        : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+
+      // Interpolate rotation
+      this.earthMesh.rotation.x = 
+        this.rotationAnimation.startRotation.x + 
+        (this.rotationAnimation.targetRotation.x - this.rotationAnimation.startRotation.x) * eased;
+      
+      this.earthMesh.rotation.y = 
+        this.rotationAnimation.startRotation.y + 
+        (this.rotationAnimation.targetRotation.y - this.rotationAnimation.startRotation.y) * eased;
+
+      if (progress >= 1) {
+        this.rotationAnimation.active = false;
+      }
+      
+      // Update marker position to match Earth rotation
+      if (this.locationMarker && this.currentMarkerPosition) {
+        this.updateMarkerPosition();
+      }
+    } else {
+      // Slow idle rotation when not animating to a target
+      this.earthMesh.rotation.y += 0.001;
+      
+      // Update marker position during idle rotation too
+      if (this.locationMarker && this.currentMarkerPosition) {
+        this.updateMarkerPosition();
+      }
+    }
 
     this.renderer.render(this.scene, this.camera);
   };
 
   /**
-   * Rotate Earth to show a specific longitude/latitude
+   * Rotate Earth to show a specific longitude/latitude with smooth animation
    * @param lon Longitude in degrees (-180 to 180)
    * @param lat Latitude in degrees (-90 to 90)
+   * @param duration Animation duration in milliseconds (default: 2000)
    */
-  rotateTo(lon: number, lat: number): void {
+  rotateTo(lon: number, lat: number, duration: number = 2000): void {
     if (!this.earthMesh) return;
 
-    // Convert to radians and apply rotation
-    // Note: Earth texture has 0° longitude at the center, so we rotate to bring target to front
-    const lonRad = THREE.MathUtils.degToRad(-lon);
-    const latRad = THREE.MathUtils.degToRad(lat);
+    // Convert to radians
+    // Y rotation: negative longitude brings location to front
+    // X rotation: positive latitude tilts northern hemisphere forward
+    const targetLonRad = THREE.MathUtils.degToRad(-lon - 90);
+    const targetLatRad = THREE.MathUtils.degToRad(lat);
 
-    this.earthMesh.rotation.y = lonRad;
-    this.earthMesh.rotation.x = latRad;
+    // Start animation from current rotation
+    this.rotationAnimation = {
+      active: true,
+      startTime: performance.now(),
+      duration,
+      startRotation: {
+        x: this.earthMesh.rotation.x,
+        y: this.earthMesh.rotation.y,
+      },
+      targetRotation: {
+        x: targetLatRad,
+        y: targetLonRad,
+      },
+    };
+
+    // Create/update location marker
+    this.setLocationMarker(lon, lat);
+  }
+
+  /**
+   * Create or update location marker at specific coordinates
+   */
+  private setLocationMarker(lon: number, lat: number): void {
+    this.currentMarkerPosition = { lat, lon };
+
+    // Remove existing marker if any
+    if (this.locationMarker) {
+      this.scene.remove(this.locationMarker);
+      this.locationMarker.material.dispose();
+    }
+
+    // Create canvas for red circle (styled like timeline data point)
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d')!;
+
+    // Clear canvas
+    ctx.clearRect(0, 0, 128, 128);
+
+    // Outer glow (faint red) - thinner and more transparent
+    const gradient = ctx.createRadialGradient(64, 64, 15, 64, 64, 28);
+    gradient.addColorStop(0, 'rgba(255, 0, 0, 0.3)');
+    gradient.addColorStop(0.6, 'rgba(255, 0, 0, 0.15)');
+    gradient.addColorStop(1, 'rgba(255, 0, 0, 0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 128, 128);
+
+    // Solid red circle (pure red, fully opaque)
+    ctx.fillStyle = 'rgb(255, 0, 0)';
+    ctx.beginPath();
+    ctx.arc(64, 64, 15, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Create sprite from canvas
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.SpriteMaterial({ 
+      map: texture, 
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+      color: 0xffffff, // Pure white to prevent any color tinting
+      blending: THREE.NormalBlending, // Ensure normal blending, not affected by lighting
+    });
+    this.locationMarker = new THREE.Sprite(material);
+    this.locationMarker.scale.set(0.10, 0.10, 1); // Small, like a timeline point
+
+    // Position marker - will be updated in world space during animation
+    this.updateMarkerPosition();
+    
+    // Add to scene (not as child of Earth) to avoid orange tint
+    this.scene.add(this.locationMarker);
+  }
+
+  /**
+   * Update marker position based on current lat/lon and Earth rotation
+   */
+  private updateMarkerPosition(): void {
+    if (!this.locationMarker || !this.currentMarkerPosition) return;
+
+    const { lat, lon } = this.currentMarkerPosition;
+    const radius = 1.0; // On Earth surface
+
+    // Calculate position in Earth's local space
+    const latRad = THREE.MathUtils.degToRad(lat);
+    const lonRad = THREE.MathUtils.degToRad(lon + 90); // Add 90 to compensate for texture offset
+    
+    const localX = radius * Math.cos(latRad) * Math.sin(lonRad);
+    const localY = radius * Math.sin(latRad);
+    const localZ = radius * Math.cos(latRad) * Math.cos(lonRad);
+    
+    // Convert to world space using Earth's rotation
+    const localPos = new THREE.Vector3(localX, localY, localZ);
+    localPos.applyEuler(this.earthMesh.rotation);
+    
+    this.locationMarker.position.copy(localPos);
+    
+    // Calculate visibility based on whether marker is facing the camera
+    // Simple approach: check if the surface normal at marker position points toward camera
+    const markerNormal = localPos.clone().normalize(); // Normal points outward from Earth center
+    const cameraDirection = new THREE.Vector3().subVectors(this.camera.position, localPos).normalize();
+    
+    // Dot product between normal and camera direction
+    // > 0 means facing camera (visible)
+    // < 0 means facing away (behind Earth)
+    const facingCamera = markerNormal.dot(cameraDirection);
+    
+    // Create smooth transition
+    // Full visibility when facingCamera > 0.2
+    // Fade out between 0.2 and -0.2
+    // Very dim when facingCamera < -0.2
+    let visibilityFactor = 1.0;
+    
+    if (facingCamera < 0.2) {
+      if (facingCamera > -0.2) {
+        // In transition zone
+        visibilityFactor = (facingCamera + 0.2) / 0.4; // Smooth fade from 1.0 to 0.0
+      } else {
+        // Fully behind
+        visibilityFactor = 0.0;
+      }
+    }
+    
+    // Store the base opacity if we haven't already (for first frame)
+    if (this.locationMarker.userData['baseOpacity'] === undefined) {
+      this.locationMarker.userData['baseOpacity'] = 1.0;
+    }
+    
+    // Apply visibility masking while preserving the fade effect from setMarkerOpacity
+    this.locationMarker.material.opacity = this.locationMarker.userData['baseOpacity'] * visibilityFactor;
+  }
+
+  /**
+   * Set marker opacity (0-1) for fade effect
+   */
+  setMarkerOpacity(opacity: number): void {
+    if (this.locationMarker && this.locationMarker.material) {
+      const clampedOpacity = Math.max(0, Math.min(1, opacity));
+      this.locationMarker.userData['baseOpacity'] = clampedOpacity;
+      // The actual opacity will be updated in updateMarkerPosition with masking applied
+    }
   }
 
   /**
