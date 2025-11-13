@@ -20,6 +20,18 @@ body {
   pointer-events: none;
 }
 
+.earth-canvas {
+  position: fixed;
+  bottom: 40px;
+  right: 40px;
+  width: 400px;
+  height: 400px;
+  display: block;
+  user-select: none;
+  pointer-events: none;
+  z-index: 10;
+}
+
 .scroll-lane {
   position: relative;
   min-height: 2100vh; // ~10× up + 10× down

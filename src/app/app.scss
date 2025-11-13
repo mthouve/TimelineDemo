@@ -88,6 +88,18 @@ app-bible-viewer {
   pointer-events: none;
 }
 
+/* Earth globe canvas */
+.earth-canvas {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 80vmin; /* Responsive size based on viewport */
+  height: 80vmin;
+  z-index: 0; /* Below starfield so it appears behind stars */
+  pointer-events: none; /* Allow clicks to pass through to timeline */
+}
+
 /* Ensure dynamically created HUD canvases align with the timeline area */
 .timeline-panel .hud {
   position: fixed;

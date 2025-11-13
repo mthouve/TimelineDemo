@@ -10,6 +10,7 @@ import {
 import { StarfieldRendererService } from './services/starfield-renderer.service';
 import { TimelineDateService, ZoomSpec } from './services/timeline-date.service';
 import { TimelineHudService } from './services/timeline-hud.service';
+import { EarthGlobeService } from './services/earth-globe.service';
 import { ZoomControlComponent } from './zoom-control/zoom-control.component';
 import { SettingsControlComponent } from './settings-control/settings-control.component';
 import { InfoBoxComponent, InfoBoxEntry } from './info-box/info-box.component';
@@ -64,6 +65,7 @@ export class App implements AfterViewInit, OnDestroy {
     private starRender: StarfieldRendererService,
     private dateService: TimelineDateService,
     private hudService: TimelineHudService,
+    private earthGlobe: EarthGlobeService,
     private r2: Renderer2
   ) {
     // Ensure a sensible base page title for tests and initial load
@@ -123,6 +125,7 @@ export class App implements AfterViewInit, OnDestroy {
   // ── View refs ─────────────────────────────────────────────────────────────────
   @ViewChild('starHost', { static: true }) starHost!: ElementRef<HTMLDivElement>;
   @ViewChild('starCanvas', { static: true }) starCanvas!: ElementRef<HTMLCanvasElement>;
+  @ViewChild('earthCanvas', { static: false }) earthCanvas!: ElementRef<HTMLCanvasElement>;
   @ViewChild('centerline', { static: true }) centerline!: ElementRef<HTMLCanvasElement>;
   @ViewChild('timeline', { static: true }) timeline!: ElementRef<HTMLCanvasElement>;
   @ViewChild(ZoomControlComponent) zoomUi?: ZoomControlComponent;
@@ -267,6 +270,15 @@ export class App implements AfterViewInit, OnDestroy {
     this.starRender.init(this.starCanvas.nativeElement, 512);
     this.starRender.setDevicePixelRatio(this.DPR);
 
+    // Initialize Earth globe with responsive size (80vmin)
+    if (this.earthCanvas && this.earthCanvas.nativeElement) {
+      console.log('Initializing Earth globe...');
+      const size = Math.min(window.innerWidth, window.innerHeight) * 0.8;
+      this.earthGlobe.init(this.earthCanvas.nativeElement, size, size);
+    } else {
+      console.error('Earth canvas not found!');
+    }
+
     this.sizeAll();
 
     this.TL.unitYears = this.zoomLevels[this.currentZoomIdx].unit;
@@ -312,6 +324,7 @@ export class App implements AfterViewInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.earthGlobe.dispose();
     window.removeEventListener('keydown', this.onKeyDown as any);
     if (this.resizeDoneTimer) clearTimeout(this.resizeDoneTimer);
     if (this.wheelHandler) window.removeEventListener('wheel', this.wheelHandler as any);
