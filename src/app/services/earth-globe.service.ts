@@ -169,6 +169,11 @@ export class EarthGlobeService {
     } else {
       // Slow idle rotation when not animating to a target
       this.earthMesh.rotation.y += 0.001;
+      // Keep angle bounded to avoid very large values over time
+      this.earthMesh.rotation.y = Math.atan2(
+        Math.sin(this.earthMesh.rotation.y),
+        Math.cos(this.earthMesh.rotation.y)
+      );
 
       // Update marker position during idle rotation too
       if (this.locationMarker && this.currentMarkerPosition) {
@@ -178,6 +183,18 @@ export class EarthGlobeService {
 
     this.renderer.render(this.scene, this.camera);
   };
+
+  /**
+   * Compute the shortest signed angular delta from angle a to angle b.
+   * Result is in [-PI, PI]. Adding this to a moves along the minimal path to b.
+   */
+  private shortestAngleDelta(a: number, b: number): number {
+    const twoPi = Math.PI * 2;
+    let diff = (b - a) % twoPi;
+    if (diff > Math.PI) diff -= twoPi;
+    if (diff < -Math.PI) diff += twoPi;
+    return diff;
+  }
 
   /**
    * Rotate Earth to show a specific longitude/latitude with smooth animation
@@ -194,18 +211,26 @@ export class EarthGlobeService {
     const targetLonRad = THREE.MathUtils.degToRad(-lon - 90);
     const targetLatRad = THREE.MathUtils.degToRad(lat);
 
+    // Compute shortest angular difference so we never spin more than necessary
+    const currentY = this.earthMesh.rotation.y;
+    const currentX = this.earthMesh.rotation.x;
+    const deltaY = this.shortestAngleDelta(currentY, targetLonRad);
+    const deltaX = this.shortestAngleDelta(currentX, targetLatRad);
+    const resolvedTargetY = currentY + deltaY; // at most PI in magnitude
+    const resolvedTargetX = currentX + deltaX;
+
     // Start animation from current rotation
     this.rotationAnimation = {
       active: true,
       startTime: performance.now(),
       duration,
       startRotation: {
-        x: this.earthMesh.rotation.x,
-        y: this.earthMesh.rotation.y,
+        x: currentX,
+        y: currentY,
       },
       targetRotation: {
-        x: targetLatRad,
-        y: targetLonRad,
+        x: resolvedTargetX,
+        y: resolvedTargetY,
       },
     };
 
