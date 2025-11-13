@@ -114,6 +114,7 @@ export class TimelineHudService {
     ctx.font = `${Math.max(11, Math.round(13 * dpr))}px system-ui, sans-serif`;
     const yTopYear = yToYearDev(0);
     const yBotYear = yToYearDev(Hc);
+    const nowYF = nowYearFraction();
 
     // Find first visible boundary by snapping the top to the unit
     let yTick: number;
@@ -137,7 +138,13 @@ export class TimelineHudService {
     while (yTick <= yBotYear + 1e-7 && safety++ < maxTicks) {
       if (yTick >= yTopYear - 1e-9) {
         const yPx = yearToY(yTick);
+        const isFuture = yTick > nowYF;
+
+        // Apply reduced opacity for future dates (no blur for performance)
+        const opacity = isFuture ? 0.35 : 1.0;
+
         ctx.fillStyle = this.grid.color;
+        ctx.globalAlpha = opacity;
         ctx.fillRect(x0, Math.round(yPx - Math.floor(thick / 2)), segLen, thick);
 
         const label = formatLabelByUnit(yTick, unitYears);
@@ -147,6 +154,8 @@ export class TimelineHudService {
           ctx.textBaseline = 'middle';
           ctx.fillText(label, x0 - labelMargin, Math.round(yPx));
         }
+
+        ctx.globalAlpha = 1.0; // reset
       }
 
       const next = dateService.nextDate(yTick, zoomLevelName);
@@ -155,7 +164,6 @@ export class TimelineHudService {
     }
 
     // Today marker (red)
-    const nowYF = nowYearFraction();
     const yToday = Math.round(yearToY(nowYF));
     if (yToday >= -4 && yToday <= Hc + 4) {
       const ySeg = yToday - Math.floor(thick / 2);
