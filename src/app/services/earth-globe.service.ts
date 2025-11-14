@@ -165,7 +165,7 @@ export class EarthGlobeService {
       },
       undefined,
       (error) => {
-        console.error('Error loading base map:', error);
+        console.warn('Error loading base map:', error);
       }
     );
 
@@ -347,7 +347,7 @@ export class EarthGlobeService {
               float cloudDensity = texture2D(cloudMap, vUv).r;
               // Only cast shadow on day side
               vec3 N = normalize(vNormal);
-              float dayFactor = max(dot(N, -sunDir), 0.0); // -sunDir because sunDir is sun→earth
+              float dayFactor = max(dot(N, -sunDir), 0.0); // sunDir is from sun toward Earth; -sunDir gives direction from surface toward sun for day/night calculation
               dayFactor = smoothstep(0.0, shadowSoftness, dayFactor);
               float shadow = cloudDensity * shadowStrength * dayFactor;
               gl_FragColor = vec4(0.0, 0.0, 0.0, shadow); // black shadow
@@ -496,8 +496,8 @@ export class EarthGlobeService {
           // Day/night modulation
           vec3 sunDirNorm = normalize(sunDir);
           float sunDot = dot(n, sunDirNorm);
-          // FrontSide normals point INWARD, so we need to negate the dot product
-          // to make day side bright (sunDir is FROM sun TO earth)
+          // FrontSide normals point OUTWARD (away from the center), so we need to negate the dot product
+          // because sunDir is FROM the sun TO earth; negation makes the day side bright
           float dayFactor = clamp(-sunDot, 0.0, 1.0);
           dayFactor = pow(dayFactor, dayPower);
           dayFactor = mix(minDay, 1.0, dayFactor);
@@ -699,7 +699,7 @@ export class EarthGlobeService {
       }
     } else {
       // Slow idle rotation when not animating to a target (halved speed)
-      this.earthGroup.rotation.y += 0.0005;
+      this.earthGroup.rotation.y += 0.0205;
       // Keep angle bounded to avoid very large values over time
       this.earthGroup.rotation.y = Math.atan2(
         Math.sin(this.earthGroup.rotation.y),
@@ -812,14 +812,20 @@ export class EarthGlobeService {
     // Remove existing marker if any
     if (this.locationMarker) {
       this.scene.remove(this.locationMarker);
-      this.locationMarker.material.dispose();
+      if (this.locationMarker.material) {
+        this.locationMarker.material.dispose();
+      }
     }
 
     // Create canvas for red circle (styled like timeline data point)
     const canvas = document.createElement('canvas');
     canvas.width = 128;
     canvas.height = 128;
-    const ctx = canvas.getContext('2d')!;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      console.warn('Failed to get 2D context for location marker canvas.');
+      return;
+    }
 
     // Clear canvas
     ctx.clearRect(0, 0, 128, 128);
@@ -869,24 +875,27 @@ export class EarthGlobeService {
     const radius = 1.0; // On Earth surface
 
     // Calculate position in Earth's local space
+    // The marker is a child of earthGroup, so we position it in local coordinates
+    // The Earth's rotation will automatically transform it to world space
     const latRad = THREE.MathUtils.degToRad(lat);
-    const lonRad = THREE.MathUtils.degToRad(lon + 90); // Add 90 to compensate for texture offset
-
+    const lonRad = THREE.MathUtils.degToRad(lon + 90); // +90 offset to match texture alignment
     const localX = radius * Math.cos(latRad) * Math.sin(lonRad);
     const localY = radius * Math.sin(latRad);
     const localZ = radius * Math.cos(latRad) * Math.cos(lonRad);
 
-    // Convert to world space using Earth's rotation
     const localPos = new THREE.Vector3(localX, localY, localZ);
-    localPos.applyEuler(this.earthGroup.rotation);
 
-    this.locationMarker.position.copy(localPos);
+    // Convert to world space using Earth's rotation
+    const worldPos = localPos.clone();
+    worldPos.applyEuler(this.earthGroup.rotation);
+
+    this.locationMarker.position.copy(worldPos);
 
     // Calculate visibility based on whether marker is facing the camera
     // Simple approach: check if the surface normal at marker position points toward camera
-    const markerNormal = localPos.clone().normalize(); // Normal points outward from Earth center
+    const markerNormal = worldPos.clone().normalize(); // Normal points outward from Earth center
     const cameraDirection = new THREE.Vector3()
-      .subVectors(this.camera.position, localPos)
+      .subVectors(this.camera.position, worldPos)
       .normalize();
 
     // Dot product between normal and camera direction

@@ -128,7 +128,7 @@ export class App implements AfterViewInit, OnDestroy {
 
       // Calculate marker opacity based on distance (fade out over 2x primary range)
       const fadeRange = primaryRange * 2.0;
-      const opacity = 1.0 - Math.min(closestDistance / fadeRange, 1.0);
+      const opacity = fadeRange > 0 ? 1.0 - Math.min(closestDistance / fadeRange, 1.0) : 0;
       this.earthGlobe.setMarkerOpacity(opacity);
     } else {
       // No location in view, hide marker
@@ -305,17 +305,17 @@ export class App implements AfterViewInit, OnDestroy {
     if (this.earthCanvas && this.earthCanvas.nativeElement) {
       const size = Math.min(window.innerWidth, window.innerHeight) * 0.8;
       this.earthGlobe.init(this.earthCanvas.nativeElement, size, size);
-      
+
       // Set initial CSS size to match
       const canvas = this.earthCanvas.nativeElement;
       canvas.style.width = size + 'px';
       canvas.style.height = size + 'px';
-      
+
       // Watch for canvas size changes with ResizeObserver
       this.earthResizeObserver = new ResizeObserver(() => {
         // Debounce the resize to wait for CSS transition to complete
         if (this.earthResizeTimer) clearTimeout(this.earthResizeTimer);
-        
+
         this.earthResizeTimer = setTimeout(() => {
           const w = this.earthCanvas.nativeElement.offsetWidth;
           const h = this.earthCanvas.nativeElement.offsetHeight;
@@ -455,17 +455,17 @@ export class App implements AfterViewInit, OnDestroy {
         this.currentZoomIdx = this._ZOOM_ANIM.targetIdx;
         this._ZOOM_ANIM.active = false;
       }
-      
+
       // Resize Earth globe and update canvas CSS size
       if (this.earthCanvas && this.earthCanvas.nativeElement) {
         const size = Math.min(window.innerWidth, window.innerHeight) * 0.8;
-        
+
         // Update CSS dimensions so ResizeObserver can detect the change
         const canvas = this.earthCanvas.nativeElement;
         canvas.style.width = size + 'px';
         canvas.style.height = size + 'px';
       }
-      
+
       this.applySize(this.viewportW(), this.viewportH());
       this.reanchorGridForCenter(keepYear);
       this.updateScrollBounds();

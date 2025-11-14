@@ -7,7 +7,6 @@ import {
   ViewChild,
 } from '@angular/core';
 import { StarfieldService } from './starfield.service';
-import { EarthGlobeService } from './services/earth-globe.service';
 
 @Component({
   selector: 'app-root',
@@ -16,7 +15,6 @@ import { EarthGlobeService } from './services/earth-globe.service';
 })
 export class AppComponent implements AfterViewInit, OnDestroy {
   @ViewChild('starCanvas', { static: true }) starCanvas!: ElementRef<HTMLCanvasElement>;
-  @ViewChild('earthCanvas', { static: false }) earthCanvas!: ElementRef<HTMLCanvasElement>;
   private ctx!: CanvasRenderingContext2D;
   private dpr = Math.max(1, window.devicePixelRatio || 1);
 
@@ -29,21 +27,13 @@ export class AppComponent implements AfterViewInit, OnDestroy {
 
   private rafId: number | null = null;
 
-  constructor(private stars: StarfieldService, private earthGlobe: EarthGlobeService) {}
+  constructor(private stars: StarfieldService) {}
 
   ngAfterViewInit(): void {
     this.ctx = this.starCanvas.nativeElement.getContext('2d')!;
     this.tile = this.stars.createStarTile('SPT-1234', this.patternSize);
     this.pattern = this.ctx.createPattern(this.tile, 'repeat')!;
     this.resizeCanvas();
-
-    // Initialize Earth globe
-    if (this.earthCanvas && this.earthCanvas.nativeElement) {
-      const earthCanvas = this.earthCanvas.nativeElement;
-      this.earthGlobe.init(earthCanvas, 400, 400);
-    } else {
-      console.error('Earth canvas not found!');
-    }
 
     // center the scroll (≈10× up and down)
     setTimeout(() => {
@@ -57,7 +47,6 @@ export class AppComponent implements AfterViewInit, OnDestroy {
 
   ngOnDestroy(): void {
     if (this.rafId !== null) cancelAnimationFrame(this.rafId);
-    this.earthGlobe.dispose();
   }
 
   @HostListener('window:resize') onResize() {
