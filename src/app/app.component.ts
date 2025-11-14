@@ -40,7 +40,6 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     // Initialize Earth globe
     if (this.earthCanvas && this.earthCanvas.nativeElement) {
       const earthCanvas = this.earthCanvas.nativeElement;
-      console.log('Initializing Earth globe on canvas:', earthCanvas);
       this.earthGlobe.init(earthCanvas, 400, 400);
     } else {
       console.error('Earth canvas not found!');

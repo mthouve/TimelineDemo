@@ -299,7 +299,6 @@ export class App implements AfterViewInit, OnDestroy {
 
     // Initialize Earth globe with responsive size (80vmin)
     if (this.earthCanvas && this.earthCanvas.nativeElement) {
-      console.log('Initializing Earth globe...');
       const size = Math.min(window.innerWidth, window.innerHeight) * 0.8;
       this.earthGlobe.init(this.earthCanvas.nativeElement, size, size);
     } else {

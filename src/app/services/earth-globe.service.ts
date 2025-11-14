@@ -90,7 +90,7 @@ export class EarthGlobeService {
    * Initialize the Three.js scene, camera, renderer, and Earth sphere
    */
   init(canvas: HTMLCanvasElement, width: number, height: number): void {
-    console.log('EarthGlobeService.init called', { canvas, width, height });
+    // Init
 
     // Scene
     this.scene = new THREE.Scene();
@@ -140,7 +140,7 @@ export class EarthGlobeService {
         if ('colorSpace' in texture) {
           (texture as any).colorSpace = THREE.SRGBColorSpace;
         }
-        console.log('Base map loaded successfully', texture);
+        // Base map loaded
         // Build an initial water mask from the original color source
         const sourceImg = texture.image as HTMLImageElement;
         const initialMask = this.createWaterMaskFromSource(sourceImg);
@@ -189,8 +189,7 @@ export class EarthGlobeService {
     textureLoader.load(
       topoUrl,
       (bumpTex) => {
-        console.log('Topography bump map loaded successfully:', bumpTex);
-        console.log('Bump map size:', bumpTex.image.width, 'x', bumpTex.image.height);
+        // Topography bump loaded
 
         // Already grayscale, just configure wrapping
         bumpTex.wrapS = THREE.RepeatWrapping;
@@ -200,8 +199,6 @@ export class EarthGlobeService {
         this.baseMaterial.bumpMap = bumpTex;
         this.baseMaterial.bumpScale = 0.35; // Further exaggerated for visibility during tuning
         this.baseMaterial.needsUpdate = true;
-        console.log('Bump map applied with scale:', this.baseMaterial.bumpScale);
-        console.log('Material has bumpMap:', !!this.baseMaterial.bumpMap);
       },
       undefined,
       (err) => {
@@ -521,8 +518,6 @@ export class EarthGlobeService {
 
     this.scene.add(this.earthGroup);
 
-    console.log('Earth mesh created and added to scene');
-
     // Bathymetry-based water mask disabled (we now rely on initial mask from base map)
 
     // Start render loop
@@ -669,8 +664,6 @@ export class EarthGlobeService {
       }
       // Debug: log once to verify
       if (!this.atmosphereMaterial.userData['debugLogged']) {
-        console.log('Sun position:', sunPos);
-        console.log('Sun direction (negated, normalized):', sunDirection);
         this.atmosphereMaterial.userData['debugLogged'] = true;
       }
     }
