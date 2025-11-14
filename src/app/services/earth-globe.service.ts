@@ -12,15 +12,11 @@ export class EarthGlobeService {
   private sunLight!: THREE.DirectionalLight;
   private earthGeometry!: THREE.SphereGeometry;
   private baseMaterial!: THREE.MeshPhongMaterial;
-  private waterMaterial!: THREE.MeshPhongMaterial;
-  private waterMaterialWide!: THREE.MeshPhongMaterial;
   private waterDiffuseMaterial!: THREE.MeshPhongMaterial;
   private waterSpecMaterial!: THREE.ShaderMaterial;
   private cloudsMaterial!: THREE.MeshPhongMaterial;
   private cloudShadowMaterial!: THREE.ShaderMaterial;
   private baseMesh!: THREE.Mesh;
-  private waterMesh!: THREE.Mesh;
-  private waterMeshWide!: THREE.Mesh;
   private waterDiffuseMesh!: THREE.Mesh;
   private waterSpecMesh!: THREE.Mesh;
   private cloudsMesh!: THREE.Mesh;
@@ -148,16 +144,7 @@ export class EarthGlobeService {
         // Build an initial water mask from the original color source
         const sourceImg = texture.image as HTMLImageElement;
         const initialMask = this.createWaterMaskFromSource(sourceImg);
-        // Apply to water overlays: assign masks
-        this.waterMaterial.alphaMap = initialMask;
-        this.waterMaterial.specularMap = initialMask;
-        this.waterMaterial.opacity = 0.0; // legacy Phong lobe disabled (using shader overlay)
-        this.waterMaterial.needsUpdate = true;
-
-        this.waterMaterialWide.alphaMap = initialMask;
-        this.waterMaterialWide.specularMap = initialMask;
-        this.waterMaterialWide.opacity = 0.0; // legacy wide lobe disabled
-        this.waterMaterialWide.needsUpdate = true;
+        // Apply to water overlays: assign masks (specular shader + diffuse only)
 
         if (this.waterDiffuseMaterial) {
           this.waterDiffuseMaterial.alphaMap = initialMask;
@@ -222,19 +209,7 @@ export class EarthGlobeService {
       }
     );
 
-    // Water overlay with specular glint (alpha-masked to oceans)
-    this.waterMaterial = new THREE.MeshPhongMaterial({
-      color: 0x000000, // no diffuse contribution; only specular will show
-      transparent: true,
-      // Smaller but brighter highlight
-      specular: new THREE.Color(0xffffff), // bright white glint
-      shininess: 380, // tighter (smaller) highlight
-      blending: THREE.AdditiveBlending, // add highlight over base
-      depthWrite: false,
-      opacity: 0.0, // hidden until water mask loads
-    });
-    this.waterMesh = new THREE.Mesh(this.earthGeometry, this.waterMaterial);
-    this.earthGroup.add(this.waterMesh);
+    // (Legacy Phong specular overlay removed; using shader-based layer below)
 
     // Day-side ocean diffuse brightening overlay (lit diffuse, no specular)
     this.waterDiffuseMaterial = new THREE.MeshPhongMaterial({
@@ -254,18 +229,7 @@ export class EarthGlobeService {
     this.waterDiffuseMesh.renderOrder = 1;
     this.earthGroup.add(this.waterDiffuseMesh);
 
-    // Broader secondary lobe for more natural highlight rolloff (very subtle)
-    this.waterMaterialWide = new THREE.MeshPhongMaterial({
-      color: 0x000000,
-      transparent: true,
-      specular: new THREE.Color(0x666666), // very dim white
-      shininess: 32, // broader lobe, 15% tighter from 24
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      opacity: 0.0,
-    });
-    this.waterMeshWide = new THREE.Mesh(this.earthGeometry, this.waterMaterialWide);
-    this.earthGroup.add(this.waterMeshWide);
+    // (Legacy broad Phong lobe removed)
 
     // Custom shader-based specular overlay for oceans: smaller, brighter sun glint
     this.waterSpecMaterial = new THREE.ShaderMaterial({
@@ -634,75 +598,7 @@ export class EarthGlobeService {
    * Create an AO map that slightly darkens land while leaving water at full intensity.
    * Land (black in source) -> mid-gray (e.g., 170), Water -> white (255).
    */
-  private createLandAOTexture(image: HTMLImageElement): THREE.CanvasTexture {
-    const c = document.createElement('canvas');
-    c.width = image.width;
-    c.height = image.height;
-    const ctx = c.getContext('2d')!;
-    ctx.drawImage(image, 0, 0);
-    const imageData = ctx.getImageData(0, 0, c.width, c.height);
-    const data = imageData.data;
-
-    for (let i = 0; i < data.length; i += 4) {
-      const r = data[i];
-      const g = data[i + 1];
-      const b = data[i + 2];
-      const sum = r + g + b;
-      const isWater = sum > 12; // same threshold as specular mask
-      const v = isWater ? 255 : 170; // land darker than water
-      data[i] = v;
-      data[i + 1] = v;
-      data[i + 2] = v;
-      data[i + 3] = 255;
-    }
-
-    ctx.putImageData(imageData, 0, 0);
-    const aoTexture = new THREE.CanvasTexture(c);
-    aoTexture.wrapS = THREE.RepeatWrapping;
-    aoTexture.wrapT = THREE.RepeatWrapping;
-    aoTexture.needsUpdate = true;
-    return aoTexture;
-  }
-
-  /**
-   * Convert texture to grayscale by manipulating image data
-   */
-  private applyGrayscaleFilter(texture: THREE.Texture): void {
-    const image = texture.image as HTMLImageElement;
-
-    // Create a canvas to manipulate the image
-    const canvas = document.createElement('canvas');
-    canvas.width = image.width;
-    canvas.height = image.height;
-    const ctx = canvas.getContext('2d');
-
-    if (!ctx) return;
-
-    // Draw the original image
-    ctx.drawImage(image, 0, 0);
-
-    // Get image data
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const data = imageData.data;
-
-    // Convert to grayscale using luminosity method
-    for (let i = 0; i < data.length; i += 4) {
-      const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-      data[i] = gray; // R
-      data[i + 1] = gray; // G
-      data[i + 2] = gray; // B
-      // data[i + 3] is alpha, leave unchanged
-    }
-
-    // Put the grayscale data back
-    ctx.putImageData(imageData, 0, 0);
-
-    // Update the texture with the grayscale canvas
-    texture.image = canvas;
-    texture.needsUpdate = true;
-
-    console.log('Grayscale filter applied to Earth texture');
-  }
+  // (Removed unused helpers: createLandAOTexture, applyGrayscaleFilter)
 
   /**
    * Create a quick water mask from the original Blue Marble color image by detecting blue-dominant pixels.
@@ -1085,8 +981,10 @@ export class EarthGlobeService {
       this.earthGeometry.dispose();
     }
     if (this.baseMaterial) this.baseMaterial.dispose();
-    if (this.waterMaterial) this.waterMaterial.dispose();
-    if (this.waterMaterialWide) this.waterMaterialWide.dispose();
+    if (this.waterDiffuseMaterial) this.waterDiffuseMaterial.dispose();
+    if (this.waterSpecMaterial) this.waterSpecMaterial.dispose();
+    if (this.cloudsMaterial) this.cloudsMaterial.dispose();
+    if (this.cloudShadowMaterial) this.cloudShadowMaterial.dispose();
     if (this.atmosphereMaterial) this.atmosphereMaterial.dispose();
   }
 }
