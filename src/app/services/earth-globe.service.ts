@@ -14,11 +14,63 @@ export class EarthGlobeService {
   private baseMaterial!: THREE.MeshPhongMaterial;
   private waterMaterial!: THREE.MeshPhongMaterial;
   private waterMaterialWide!: THREE.MeshPhongMaterial;
+  private waterDiffuseMaterial!: THREE.MeshPhongMaterial;
+  private cloudsMaterial!: THREE.MeshPhongMaterial;
   private baseMesh!: THREE.Mesh;
   private waterMesh!: THREE.Mesh;
   private waterMeshWide!: THREE.Mesh;
+  private waterDiffuseMesh!: THREE.Mesh;
+  private cloudsMesh!: THREE.Mesh;
   private atmosphereMesh!: THREE.Mesh;
   private atmosphereMaterial!: THREE.ShaderMaterial;
+  private innerAtmosphereMaterial!: THREE.ShaderMaterial;
+
+  /**
+   * Toggle a debug mode that makes the topography much easier to see by:
+   *  - Removing the color texture (so lighting+shading dominate)
+   *  - Setting a neutral gray albedo
+   *  - Greatly exaggerating bumpScale
+   *  - Optionally repositions the sun for more grazing light
+   */
+  public setTopographyDebugMode(enabled: boolean): void {
+    if (!this.baseMaterial) return;
+    if (enabled) {
+      if (this.baseMaterial.map) {
+        this.baseMaterial.map = null;
+      }
+      this.baseMaterial.color = new THREE.Color(0x888888);
+      if (this.baseMaterial.bumpScale < 0.5) {
+        this.baseMaterial.bumpScale = 0.6; // dramatic exaggeration
+      }
+      this.baseMaterial.needsUpdate = true;
+      if (this.sunLight) {
+        this.sunLight.position.set(5, 0.5, 0); // low angle for raking light
+      }
+      console.log('[TopoDebug] Enabled. bumpScale=', this.baseMaterial.bumpScale);
+    } else {
+      // Restore texture (reload if needed)
+      if (!this.baseMaterial.map) {
+        const loader = new THREE.TextureLoader();
+        loader.load('assets/land_ocean_ice_2048.jpg', (tex) => {
+          if ('colorSpace' in tex) {
+            (tex as any).colorSpace = THREE.SRGBColorSpace;
+          }
+          this.baseMaterial.map = tex;
+          this.baseMaterial.needsUpdate = true;
+          console.log('[TopoDebug] Restored base map texture');
+        });
+      }
+      this.baseMaterial.color = new THREE.Color(0xffffff);
+      // dial back exaggeration if it was extreme
+      if (this.baseMaterial.bumpScale > 0.2) {
+        this.baseMaterial.bumpScale = 0.12; // still a bit high until final tuning
+      }
+      if (this.sunLight) {
+        this.sunLight.position.set(5, 3, 5); // original position
+      }
+      console.log('[TopoDebug] Disabled. bumpScale=', this.baseMaterial.bumpScale);
+    }
+  }
   private animationFrameId: number | null = null;
   private locationMarker: THREE.Sprite | null = null;
   private currentMarkerPosition: { lat: number; lon: number } | null = null;
@@ -56,12 +108,17 @@ export class EarthGlobeService {
     this.renderer.setSize(width, height);
     this.renderer.setPixelRatio(window.devicePixelRatio);
     this.renderer.setClearColor(0x000000, 0); // Transparent background
+    // Tone mapping & exposure to better match photographic highlights
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.15;
 
     // Lighting
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.06); // lower ambient to keep nights dark
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.08); // slight global lift
     this.scene.add(ambientLight);
+    const hemiLight = new THREE.HemisphereLight(0x7fbfff, 0x0d1a26, 0.18); // subtle skylight fill
+    this.scene.add(hemiLight);
 
-    this.sunLight = new THREE.DirectionalLight(0xffffff, 1.35); // brighter sun for stronger day-side
+    this.sunLight = new THREE.DirectionalLight(0xffffff, 2.9); // intensified sun for brighter day side
     this.sunLight.position.set(5, 3, 5);
     this.scene.add(this.sunLight);
 
@@ -74,16 +131,20 @@ export class EarthGlobeService {
     }
     this.earthGeometry = geometry;
 
-    // Load NASA Blue Marble texture and convert to grayscale
+    // Load base color map (realistic land/ocean/ice)
     const textureLoader = new THREE.TextureLoader();
     const earthTexture = textureLoader.load(
-      'assets/earth-blue-marble.png',
+      'assets/land_ocean_ice_2048.jpg',
       (texture) => {
-        console.log('Earth texture loaded successfully', texture);
-        // Build an initial water mask from the original color source before grayscaling
+        // Ensure correct color space for photographic textures
+        if ('colorSpace' in texture) {
+          (texture as any).colorSpace = THREE.SRGBColorSpace;
+        }
+        console.log('Base map loaded successfully', texture);
+        // Build an initial water mask from the original color source
         const sourceImg = texture.image as HTMLImageElement;
         const initialMask = this.createWaterMaskFromSource(sourceImg);
-        // Apply to both specular lobes with dimmer defaults
+        // Apply to water overlays: specular lobes and diffuse brightening layer
         this.waterMaterial.alphaMap = initialMask;
         this.waterMaterial.specularMap = initialMask;
         this.waterMaterial.opacity = 0.22; // narrow lobe
@@ -94,22 +155,27 @@ export class EarthGlobeService {
         this.waterMaterialWide.opacity = 0.06; // broad lobe (very subtle)
         this.waterMaterialWide.needsUpdate = true;
 
-        // Convert texture to grayscale for the base material
-        this.applyGrayscaleFilter(texture);
+        if (this.waterDiffuseMaterial) {
+          this.waterDiffuseMaterial.alphaMap = initialMask;
+          this.waterDiffuseMaterial.opacity = 0.14; // subtle brighten of oceans on day side
+          this.waterDiffuseMaterial.needsUpdate = true;
+        }
+
+        // No grayscale conversion - keep natural colors
       },
       undefined,
       (error) => {
-        console.error('Error loading Earth texture:', error);
+        console.error('Error loading base map:', error);
       }
     );
 
     // Build Earth as a group of two meshes: base (unlit) + water overlay (lit/specular)
     this.earthGroup = new THREE.Group();
 
-    // Base (land + water) diffuse-lit with orange tint, no specular on land
+    // Base (land + water) diffuse-lit, no color tint
     this.baseMaterial = new THREE.MeshPhongMaterial({
       map: earthTexture,
-      color: 0xff9642,
+      color: 0xffffff, // white (no tint) - shows true colors
       emissive: 0x000000,
       specular: 0x000000, // disable specular on base so land doesn't glint
       shininess: 0,
@@ -117,12 +183,37 @@ export class EarthGlobeService {
     this.baseMesh = new THREE.Mesh(this.earthGeometry, this.baseMaterial);
     this.earthGroup.add(this.baseMesh);
 
+    // Load topography/elevation bump map for surface relief
+    const topoUrl = 'assets/earth-topography.png';
+    textureLoader.load(
+      topoUrl,
+      (bumpTex) => {
+        console.log('Topography bump map loaded successfully:', bumpTex);
+        console.log('Bump map size:', bumpTex.image.width, 'x', bumpTex.image.height);
+
+        // Already grayscale, just configure wrapping
+        bumpTex.wrapS = THREE.RepeatWrapping;
+        bumpTex.wrapT = THREE.RepeatWrapping;
+        bumpTex.needsUpdate = true;
+
+        this.baseMaterial.bumpMap = bumpTex;
+        this.baseMaterial.bumpScale = 0.35; // Further exaggerated for visibility during tuning
+        this.baseMaterial.needsUpdate = true;
+        console.log('Bump map applied with scale:', this.baseMaterial.bumpScale);
+        console.log('Material has bumpMap:', !!this.baseMaterial.bumpMap);
+      },
+      undefined,
+      (err) => {
+        console.warn('Topography bump map not found; surface will be smooth', err);
+      }
+    );
+
     // Water overlay with specular glint (alpha-masked to oceans)
     this.waterMaterial = new THREE.MeshPhongMaterial({
       color: 0x000000, // no diffuse contribution; only specular will show
       transparent: true,
-      // Dimmer, smaller highlight
-      specular: new THREE.Color(0x663814), // darker orange glint
+      // Dimmer, smaller highlight with natural white color
+      specular: new THREE.Color(0xaaaaaa), // dim white glint (natural sun reflection)
       shininess: 160, // much tighter (smaller) highlight
       blending: THREE.AdditiveBlending, // add highlight over base
       depthWrite: false,
@@ -131,11 +222,24 @@ export class EarthGlobeService {
     this.waterMesh = new THREE.Mesh(this.earthGeometry, this.waterMaterial);
     this.earthGroup.add(this.waterMesh);
 
+    // Day-side ocean diffuse brightening overlay (lit diffuse, no specular)
+    this.waterDiffuseMaterial = new THREE.MeshPhongMaterial({
+      color: new THREE.Color(0x58b3ff), // light ocean tint to add to base
+      specular: new THREE.Color(0x000000), // no specular in this layer
+      shininess: 0,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      opacity: 0.0, // enabled after mask applies
+    });
+    this.waterDiffuseMesh = new THREE.Mesh(this.earthGeometry, this.waterDiffuseMaterial);
+    this.earthGroup.add(this.waterDiffuseMesh);
+
     // Broader secondary lobe for more natural highlight rolloff (very subtle)
     this.waterMaterialWide = new THREE.MeshPhongMaterial({
       color: 0x000000,
       transparent: true,
-      specular: new THREE.Color(0x3d220e), // very dim orange
+      specular: new THREE.Color(0x666666), // very dim white
       shininess: 24, // still broad, but subtle
       blending: THREE.AdditiveBlending,
       depthWrite: false,
@@ -144,12 +248,43 @@ export class EarthGlobeService {
     this.waterMeshWide = new THREE.Mesh(this.earthGeometry, this.waterMaterialWide);
     this.earthGroup.add(this.waterMeshWide);
 
-    // Subtle atmospheric halo (additive rim glow)
-    const glowColor = new THREE.Color(0xff9642);
+    // Clouds layer: alpha-driven white layer on a slightly larger sphere
+    textureLoader.load(
+      'assets/cloud_combined_2048.jpg',
+      (cloudsTex) => {
+        if ('colorSpace' in cloudsTex) {
+          (cloudsTex as any).colorSpace = THREE.SRGBColorSpace;
+        }
+        cloudsTex.needsUpdate = true;
+
+        this.cloudsMaterial = new THREE.MeshPhongMaterial({
+          color: 0xffffff,
+          transparent: true,
+          alphaMap: cloudsTex,
+          alphaTest: 0.12, // discard very faint values to reduce haze
+          depthWrite: false,
+          blending: THREE.NormalBlending,
+          shininess: 0,
+          specular: new THREE.Color(0x000000),
+          opacity: 0.85,
+        });
+        this.cloudsMesh = new THREE.Mesh(this.earthGeometry, this.cloudsMaterial);
+        this.cloudsMesh.scale.setScalar(1.01);
+        this.cloudsMesh.renderOrder = 1; // draw before inner atmosphere (2)
+        this.earthGroup.add(this.cloudsMesh);
+      },
+      undefined,
+      (err) => {
+        console.warn('Cloud texture not found; continuing without clouds', err);
+      }
+    );
+
+    // Subtle atmospheric halo (natural blue-white glow)
+    const glowColor = new THREE.Color(0xadd8e6); // light blue like real atmosphere
     this.atmosphereMaterial = new THREE.ShaderMaterial({
       uniforms: {
         glowColor: { value: new THREE.Vector3(glowColor.r, glowColor.g, glowColor.b) },
-        intensity: { value: 0.5 }, // boosted for visibility
+        intensity: { value: 1.2 }, // much brighter for visibility
         power: { value: 2.0 }, // softer falloff
         rimStart: { value: 0.0 }, // start immediately at surface (no gap)
         rimEnd: { value: 0.99 }, // end of rim (near silhouette)
@@ -157,7 +292,7 @@ export class EarthGlobeService {
         outerEnd: { value: 1.0 }, // fully faded at 1.0
         sunDir: { value: new THREE.Vector3(0, 0, 1) }, // filled each frame from directional light
         dayPower: { value: 1.2 },
-        minDay: { value: 0.05 }, // much lower to create stronger day/night contrast
+        minDay: { value: 0.2 }, // higher minimum so night side is also visible
       },
       vertexShader: `
         varying vec3 vWorldPosition;
@@ -227,6 +362,68 @@ export class EarthGlobeService {
     this.atmosphereMesh.renderOrder = 1; // render after Earth
     this.earthGroup.add(this.atmosphereMesh);
 
+    // Add inner atmospheric glow (FrontSide) to soften Earth's edges
+    this.innerAtmosphereMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        glowColor: { value: new THREE.Vector3(glowColor.r, glowColor.g, glowColor.b) },
+        intensity: { value: 0.8 }, // visible but not overpowering
+        power: { value: 2.0 }, // softer falloff for wider glow
+        sunDir: { value: new THREE.Vector3(0, 0, 1) },
+        dayPower: { value: 1.2 },
+        minDay: { value: 0.4 }, // keep it visible on night side too
+      },
+      vertexShader: `
+        varying vec3 vWorldPosition;
+        varying vec3 vNormal;
+        void main() {
+          vNormal = normalize(normalMatrix * normal);
+          vec4 worldPos = modelMatrix * vec4(position, 1.0);
+          vWorldPosition = worldPos.xyz;
+          gl_Position = projectionMatrix * viewMatrix * worldPos;
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 glowColor;
+        uniform float intensity;
+        uniform float power;
+        uniform vec3 sunDir;
+        uniform float dayPower;
+        uniform float minDay;
+        varying vec3 vWorldPosition;
+        varying vec3 vNormal;
+        void main() {
+          vec3 viewDir = normalize(cameraPosition - vWorldPosition);
+          vec3 n = normalize(vNormal); // FrontSide: use normal as-is
+          float rim = 1.0 - dot(viewDir, n);
+          rim = clamp(rim, 0.0, 1.0);
+          
+          // Glow at the edges - start earlier for more visibility
+          float edgeGlow = smoothstep(0.3, 1.0, rim);
+          float density = pow(edgeGlow, power);
+          
+          // Day/night modulation
+          vec3 sunDirNorm = normalize(sunDir);
+          float sunDot = dot(n, sunDirNorm);
+          // FrontSide normals point INWARD, so we need to negate the dot product
+          // to make day side bright (sunDir is FROM sun TO earth)
+          float dayFactor = clamp(-sunDot, 0.0, 1.0);
+          dayFactor = pow(dayFactor, dayPower);
+          dayFactor = mix(minDay, 1.0, dayFactor);
+          
+          float alpha = intensity * density * dayFactor;
+          gl_FragColor = vec4(glowColor * alpha, alpha);
+        }
+      `,
+      side: THREE.FrontSide,
+      blending: THREE.AdditiveBlending,
+      transparent: true,
+      depthWrite: false,
+    });
+    const innerAtmosphereMesh = new THREE.Mesh(this.earthGeometry, this.innerAtmosphereMaterial);
+    innerAtmosphereMesh.scale.setScalar(1.003); // very tight to Earth surface
+    innerAtmosphereMesh.renderOrder = 2; // render after outer atmosphere
+    this.earthGroup.add(innerAtmosphereMesh);
+
     this.scene.add(this.earthGroup);
 
     console.log('Earth mesh created and added to scene');
@@ -265,6 +462,13 @@ export class EarthGlobeService {
       this.waterMaterialWide.transparent = true;
       this.waterMaterialWide.opacity = 0.06; // broad lobe very subtle
       this.waterMaterialWide.needsUpdate = true;
+      // Apply mask to diffuse brightening overlay
+      if (this.waterDiffuseMaterial) {
+        this.waterDiffuseMaterial.alphaMap = waterMask;
+        this.waterDiffuseMaterial.transparent = true;
+        this.waterDiffuseMaterial.opacity = 0.14; // subtle brighten
+        this.waterDiffuseMaterial.needsUpdate = true;
+      }
     };
 
     // First try local path
@@ -479,6 +683,10 @@ export class EarthGlobeService {
       if (this.atmosphereMaterial.uniforms['sunDir']) {
         (this.atmosphereMaterial.uniforms['sunDir'].value as THREE.Vector3).copy(sunDirection);
       }
+      // Update inner atmosphere sun direction too
+      if (this.innerAtmosphereMaterial?.uniforms?.['sunDir']) {
+        (this.innerAtmosphereMaterial.uniforms['sunDir'].value as THREE.Vector3).copy(sunDirection);
+      }
       // Debug: log once to verify
       if (!this.atmosphereMaterial.userData['debugLogged']) {
         console.log('Sun position:', sunPos);
@@ -531,6 +739,10 @@ export class EarthGlobeService {
       }
     }
 
+    // Subtle cloud drift relative to Earth rotation
+    if (this.cloudsMesh) {
+      this.cloudsMesh.rotation.y += 0.0001;
+    }
     this.renderer.render(this.scene, this.camera);
   };
 
