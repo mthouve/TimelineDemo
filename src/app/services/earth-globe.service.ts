@@ -15,12 +15,16 @@ export class EarthGlobeService {
   private waterMaterial!: THREE.MeshPhongMaterial;
   private waterMaterialWide!: THREE.MeshPhongMaterial;
   private waterDiffuseMaterial!: THREE.MeshPhongMaterial;
+  private waterSpecMaterial!: THREE.ShaderMaterial;
   private cloudsMaterial!: THREE.MeshPhongMaterial;
+  private cloudShadowMaterial!: THREE.ShaderMaterial;
   private baseMesh!: THREE.Mesh;
   private waterMesh!: THREE.Mesh;
   private waterMeshWide!: THREE.Mesh;
   private waterDiffuseMesh!: THREE.Mesh;
+  private waterSpecMesh!: THREE.Mesh;
   private cloudsMesh!: THREE.Mesh;
+  private cloudShadowMesh!: THREE.Mesh;
   private atmosphereMesh!: THREE.Mesh;
   private atmosphereMaterial!: THREE.ShaderMaterial;
   private innerAtmosphereMaterial!: THREE.ShaderMaterial;
@@ -144,21 +148,30 @@ export class EarthGlobeService {
         // Build an initial water mask from the original color source
         const sourceImg = texture.image as HTMLImageElement;
         const initialMask = this.createWaterMaskFromSource(sourceImg);
-        // Apply to water overlays: specular lobes and diffuse brightening layer
+        // Apply to water overlays: assign masks
         this.waterMaterial.alphaMap = initialMask;
         this.waterMaterial.specularMap = initialMask;
-        this.waterMaterial.opacity = 0.22; // narrow lobe
+        this.waterMaterial.opacity = 0.0; // legacy Phong lobe disabled (using shader overlay)
         this.waterMaterial.needsUpdate = true;
 
         this.waterMaterialWide.alphaMap = initialMask;
         this.waterMaterialWide.specularMap = initialMask;
-        this.waterMaterialWide.opacity = 0.06; // broad lobe (very subtle)
+        this.waterMaterialWide.opacity = 0.0; // legacy wide lobe disabled
         this.waterMaterialWide.needsUpdate = true;
 
         if (this.waterDiffuseMaterial) {
           this.waterDiffuseMaterial.alphaMap = initialMask;
           this.waterDiffuseMaterial.opacity = 0.14; // subtle brighten of oceans on day side
           this.waterDiffuseMaterial.needsUpdate = true;
+        }
+
+        // Shader-based specular overlay mask
+        if (this.waterSpecMaterial) {
+          this.waterSpecMaterial.uniforms['maskMap'].value = initialMask;
+          if (this.waterSpecMaterial.uniforms['hasMask']) {
+            this.waterSpecMaterial.uniforms['hasMask'].value = true;
+          }
+          this.waterSpecMaterial.needsUpdate = true;
         }
 
         // No grayscale conversion - keep natural colors
@@ -181,6 +194,7 @@ export class EarthGlobeService {
       shininess: 0,
     });
     this.baseMesh = new THREE.Mesh(this.earthGeometry, this.baseMaterial);
+    this.baseMesh.renderOrder = 0;
     this.earthGroup.add(this.baseMesh);
 
     // Load topography/elevation bump map for surface relief
@@ -212,9 +226,9 @@ export class EarthGlobeService {
     this.waterMaterial = new THREE.MeshPhongMaterial({
       color: 0x000000, // no diffuse contribution; only specular will show
       transparent: true,
-      // Dimmer, smaller highlight with natural white color
-      specular: new THREE.Color(0xaaaaaa), // dim white glint (natural sun reflection)
-      shininess: 160, // much tighter (smaller) highlight
+      // Smaller but brighter highlight
+      specular: new THREE.Color(0xffffff), // bright white glint
+      shininess: 380, // tighter (smaller) highlight
       blending: THREE.AdditiveBlending, // add highlight over base
       depthWrite: false,
       opacity: 0.0, // hidden until water mask loads
@@ -232,7 +246,12 @@ export class EarthGlobeService {
       depthWrite: false,
       opacity: 0.0, // enabled after mask applies
     });
+    // Nudge forward to avoid any depth edge artifacts with base mesh
+    this.waterDiffuseMaterial.polygonOffset = true;
+    this.waterDiffuseMaterial.polygonOffsetFactor = -1;
+    this.waterDiffuseMaterial.polygonOffsetUnits = -1;
     this.waterDiffuseMesh = new THREE.Mesh(this.earthGeometry, this.waterDiffuseMaterial);
+    this.waterDiffuseMesh.renderOrder = 1;
     this.earthGroup.add(this.waterDiffuseMesh);
 
     // Broader secondary lobe for more natural highlight rolloff (very subtle)
@@ -240,13 +259,79 @@ export class EarthGlobeService {
       color: 0x000000,
       transparent: true,
       specular: new THREE.Color(0x666666), // very dim white
-      shininess: 24, // still broad, but subtle
+      shininess: 32, // broader lobe, 15% tighter from 24
       blending: THREE.AdditiveBlending,
       depthWrite: false,
       opacity: 0.0,
     });
     this.waterMeshWide = new THREE.Mesh(this.earthGeometry, this.waterMaterialWide);
     this.earthGroup.add(this.waterMeshWide);
+
+    // Custom shader-based specular overlay for oceans: smaller, brighter sun glint
+    this.waterSpecMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        lightDir: { value: new THREE.Vector3(0, 0, 1) }, // from surface to sun
+        specColor: { value: new THREE.Color(0xffffff) },
+        shininess: { value: 180.0 }, // much wider highlight for gradual falloff
+        footprint: { value: 1.3 }, // broader footprint for smoother gradient
+        brightness: { value: 1.5 }, // keep brightness (spot on)
+        maskMap: { value: null as any },
+        hasMask: { value: false },
+      },
+      vertexShader: `
+        varying vec3 vWorldPosition;
+        varying vec3 vNormal;
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          vNormal = normalize(normalMatrix * normal);
+          vec4 worldPos = modelMatrix * vec4(position, 1.0);
+          vWorldPosition = worldPos.xyz;
+          gl_Position = projectionMatrix * viewMatrix * worldPos;
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 lightDir; // direction from surface to light
+        uniform vec3 specColor;
+        uniform float shininess;
+        uniform float footprint;
+        uniform float brightness;
+        uniform sampler2D maskMap;
+        uniform bool hasMask;
+        varying vec3 vWorldPosition;
+        varying vec3 vNormal;
+        varying vec2 vUv;
+        void main() {
+          float mask = hasMask ? texture2D(maskMap, vUv).r : 1.0;
+          if (mask < 0.001) discard;
+
+          vec3 N = normalize(vNormal);
+          vec3 V = normalize(cameraPosition - vWorldPosition);
+          vec3 L = normalize(lightDir);
+          float dotNL = max(dot(N, L), 0.0);
+          vec3 H = normalize(L + V);
+          float dotNH = max(dot(N, H), 0.0);
+          float spec = pow(dotNH, shininess);
+          spec *= pow(dotNL, footprint);
+          spec *= mask; // apply mask to intensity as well
+          // Soft-knee tone map to reduce harsh white peak but keep area bright
+          spec = spec / (1.0 + spec); // Reinhard tone mapping
+          vec3 color = specColor * (spec * brightness);
+          float alpha = spec * brightness;
+          gl_FragColor = vec4(color, alpha);
+        }
+      `,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    // Nudge forward slightly and enforce stable draw order
+    this.waterSpecMaterial.polygonOffset = true as any;
+    (this.waterSpecMaterial as any).polygonOffsetFactor = -1;
+    (this.waterSpecMaterial as any).polygonOffsetUnits = -1;
+    this.waterSpecMesh = new THREE.Mesh(this.earthGeometry, this.waterSpecMaterial);
+    this.waterSpecMesh.renderOrder = 2;
+    this.earthGroup.add(this.waterSpecMesh);
 
     // Clouds layer: alpha-driven white layer on a slightly larger sphere
     textureLoader.load(
@@ -270,8 +355,54 @@ export class EarthGlobeService {
         });
         this.cloudsMesh = new THREE.Mesh(this.earthGeometry, this.cloudsMaterial);
         this.cloudsMesh.scale.setScalar(1.01);
-        this.cloudsMesh.renderOrder = 1; // draw before inner atmosphere (2)
+        this.cloudsMesh.renderOrder = 3; // draw before atmospheres
         this.earthGroup.add(this.cloudsMesh);
+
+        // Cloud shadow overlay: darkens the surface below clouds on day side
+        this.cloudShadowMaterial = new THREE.ShaderMaterial({
+          uniforms: {
+            cloudMap: { value: cloudsTex },
+            sunDir: { value: new THREE.Vector3(0, 0, 1) },
+            shadowStrength: { value: 0.4 }, // subtle darkening
+            shadowSoftness: { value: 0.6 }, // fade at shadow edge
+          },
+          vertexShader: `
+            varying vec2 vUv;
+            varying vec3 vNormal;
+            void main() {
+              vUv = uv;
+              vNormal = normalize(normalMatrix * normal);
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+          `,
+          fragmentShader: `
+            uniform sampler2D cloudMap;
+            uniform vec3 sunDir;
+            uniform float shadowStrength;
+            uniform float shadowSoftness;
+            varying vec2 vUv;
+            varying vec3 vNormal;
+            void main() {
+              float cloudDensity = texture2D(cloudMap, vUv).r;
+              // Only cast shadow on day side
+              vec3 N = normalize(vNormal);
+              float dayFactor = max(dot(N, -sunDir), 0.0); // -sunDir because sunDir is sun→earth
+              dayFactor = smoothstep(0.0, shadowSoftness, dayFactor);
+              float shadow = cloudDensity * shadowStrength * dayFactor;
+              gl_FragColor = vec4(0.0, 0.0, 0.0, shadow); // black shadow
+            }
+          `,
+          transparent: true,
+          blending: THREE.CustomBlending,
+          blendEquation: THREE.AddEquation,
+          blendSrc: THREE.ZeroFactor,
+          blendDst: THREE.OneMinusSrcAlphaFactor,
+          depthWrite: false,
+        });
+        this.cloudShadowMesh = new THREE.Mesh(this.earthGeometry, this.cloudShadowMaterial);
+        this.cloudShadowMesh.scale.setScalar(1.002); // just above surface, below clouds
+        this.cloudShadowMesh.renderOrder = 1; // render after base but before water overlays
+        this.earthGroup.add(this.cloudShadowMesh);
       },
       undefined,
       (err) => {
@@ -284,14 +415,14 @@ export class EarthGlobeService {
     this.atmosphereMaterial = new THREE.ShaderMaterial({
       uniforms: {
         glowColor: { value: new THREE.Vector3(glowColor.r, glowColor.g, glowColor.b) },
-        intensity: { value: 1.2 }, // much brighter for visibility
+        intensity: { value: 2.0 }, // much brighter for visibility
         power: { value: 2.0 }, // softer falloff
-        rimStart: { value: 0.0 }, // start immediately at surface (no gap)
+        rimStart: { value: 0.3 }, // start immediately at surface (no gap)
         rimEnd: { value: 0.99 }, // end of rim (near silhouette)
         outerStart: { value: 0.92 }, // begin softening the outer border
         outerEnd: { value: 1.0 }, // fully faded at 1.0
         sunDir: { value: new THREE.Vector3(0, 0, 1) }, // filled each frame from directional light
-        dayPower: { value: 1.2 },
+        dayPower: { value: 1.0 },
         minDay: { value: 0.2 }, // higher minimum so night side is also visible
       },
       vertexShader: `
@@ -358,8 +489,8 @@ export class EarthGlobeService {
       depthWrite: false,
     });
     this.atmosphereMesh = new THREE.Mesh(this.earthGeometry, this.atmosphereMaterial);
-    this.atmosphereMesh.scale.setScalar(1.06); // larger shell for visible glow
-    this.atmosphereMesh.renderOrder = 1; // render after Earth
+    this.atmosphereMesh.scale.setScalar(1.03); // thinner shell for more realistic height
+    this.atmosphereMesh.renderOrder = 4; // render after clouds and water
     this.earthGroup.add(this.atmosphereMesh);
 
     // Add inner atmospheric glow (FrontSide) to soften Earth's edges
@@ -421,7 +552,7 @@ export class EarthGlobeService {
     });
     const innerAtmosphereMesh = new THREE.Mesh(this.earthGeometry, this.innerAtmosphereMaterial);
     innerAtmosphereMesh.scale.setScalar(1.003); // very tight to Earth surface
-    innerAtmosphereMesh.renderOrder = 2; // render after outer atmosphere
+    innerAtmosphereMesh.renderOrder = 5; // render last
     this.earthGroup.add(innerAtmosphereMesh);
 
     this.scene.add(this.earthGroup);
@@ -452,7 +583,8 @@ export class EarthGlobeService {
       this.waterMaterial.alphaMap = waterMask;
       this.waterMaterial.specularMap = waterMask;
       this.waterMaterial.transparent = true;
-      this.waterMaterial.opacity = 0.22; // narrow lobe dimmer
+      // Disable legacy Phong specular lobes (use shader-based overlay instead)
+      this.waterMaterial.opacity = 0.0;
       this.waterMaterial.needsUpdate = true;
       // Ensure correct encoding and update for mask textures
       waterMask.needsUpdate = true;
@@ -460,7 +592,8 @@ export class EarthGlobeService {
       this.waterMaterialWide.alphaMap = waterMask;
       this.waterMaterialWide.specularMap = waterMask;
       this.waterMaterialWide.transparent = true;
-      this.waterMaterialWide.opacity = 0.06; // broad lobe very subtle
+      // Disable legacy broad lobe as well
+      this.waterMaterialWide.opacity = 0.0;
       this.waterMaterialWide.needsUpdate = true;
       // Apply mask to diffuse brightening overlay
       if (this.waterDiffuseMaterial) {
@@ -468,6 +601,14 @@ export class EarthGlobeService {
         this.waterDiffuseMaterial.transparent = true;
         this.waterDiffuseMaterial.opacity = 0.14; // subtle brighten
         this.waterDiffuseMaterial.needsUpdate = true;
+      }
+      // Apply mask to shader-based specular overlay
+      if (this.waterSpecMaterial) {
+        this.waterSpecMaterial.uniforms['maskMap'].value = waterMask;
+        if (this.waterSpecMaterial.uniforms['hasMask']) {
+          this.waterSpecMaterial.uniforms['hasMask'].value = true;
+        }
+        this.waterSpecMaterial.needsUpdate = true;
       }
     };
 
@@ -687,6 +828,16 @@ export class EarthGlobeService {
       if (this.innerAtmosphereMaterial?.uniforms?.['sunDir']) {
         (this.innerAtmosphereMaterial.uniforms['sunDir'].value as THREE.Vector3).copy(sunDirection);
       }
+      // Update water specular shader with light direction (surface -> sun)
+      if (this.waterSpecMaterial?.uniforms?.['lightDir']) {
+        (this.waterSpecMaterial.uniforms['lightDir'].value as THREE.Vector3)
+          .copy(sunDirection)
+          .multiplyScalar(-1);
+      }
+      // Update cloud shadow shader with sun direction
+      if (this.cloudShadowMaterial?.uniforms?.['sunDir']) {
+        (this.cloudShadowMaterial.uniforms['sunDir'].value as THREE.Vector3).copy(sunDirection);
+      }
       // Debug: log once to verify
       if (!this.atmosphereMaterial.userData['debugLogged']) {
         console.log('Sun position:', sunPos);
@@ -742,9 +893,39 @@ export class EarthGlobeService {
     // Subtle cloud drift relative to Earth rotation
     if (this.cloudsMesh) {
       this.cloudsMesh.rotation.y += 0.0001;
+      // Keep shadow layer in sync with clouds
+      if (this.cloudShadowMesh) {
+        this.cloudShadowMesh.rotation.y = this.cloudsMesh.rotation.y;
+      }
     }
     this.renderer.render(this.scene, this.camera);
   };
+
+  /**
+   * Adjust the perceived blur radius of the sun glint on oceans.
+   * radius: 0 (tight, small) .. 1 (wide, soft)
+   * Internally remaps to shader uniforms: shininess, footprint, and brightness.
+   */
+  public setWaterSpecBlur(radius: number): void {
+    if (!this.waterSpecMaterial) return;
+    const r = THREE.MathUtils.clamp(radius, 0, 1);
+    // Map radius to wider highlight by lowering shininess and footprint
+    const shininess = THREE.MathUtils.lerp(650, 160, r); // lower = wider
+    const footprint = THREE.MathUtils.lerp(5.0, 1.2, r); // lower = broader footprint
+    // Maintain perceived brightness as the highlight spreads but avoid blowout
+    const brightness = THREE.MathUtils.lerp(1.35, 1.8, r);
+
+    if (this.waterSpecMaterial.uniforms['shininess']) {
+      this.waterSpecMaterial.uniforms['shininess'].value = shininess;
+    }
+    if (this.waterSpecMaterial.uniforms['footprint']) {
+      this.waterSpecMaterial.uniforms['footprint'].value = footprint;
+    }
+    if (this.waterSpecMaterial.uniforms['brightness']) {
+      this.waterSpecMaterial.uniforms['brightness'].value = brightness;
+    }
+    this.waterSpecMaterial.needsUpdate = true;
+  }
 
   /**
    * Compute the shortest signed angular delta from angle a to angle b.
