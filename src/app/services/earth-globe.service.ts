@@ -935,11 +935,13 @@ export class EarthGlobeService {
    * Update canvas size when window resizes
    */
   resize(width: number, height: number): void {
-    if (!this.camera || !this.renderer) return;
+    if (!this.camera || !this.renderer) {
+      return;
+    }
 
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
-    this.renderer.setSize(width, height);
+    this.renderer.setSize(width, height, false);
   }
 
   /** Toggle the atmospheric halo on/off */

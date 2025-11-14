@@ -248,8 +248,12 @@ export class App implements AfterViewInit, OnDestroy {
 
   private readonly VWIN_MULT = 17;
   private readonly EDGE_EPS = 2;
+
+  // Earth canvas resize observer
+  private earthResizeObserver: ResizeObserver | null = null;
+  private earthResizeTimer: any = null;
   private resizeDoneTimer: any = null;
-  private readonly RESIZE_DEBOUNCE_MS = 250;
+  private readonly RESIZE_DEBOUNCE_MS = 150;
 
   // Raw listeners
   private wheelHandler?: (e: WheelEvent) => void;
@@ -297,10 +301,30 @@ export class App implements AfterViewInit, OnDestroy {
     this.starRender.init(this.starCanvas.nativeElement, 512);
     this.starRender.setDevicePixelRatio(this.DPR);
 
-    // Initialize Earth globe with responsive size (80vmin)
+    // Initialize Earth globe with responsive size (80vmin - 80% of smaller dimension)
     if (this.earthCanvas && this.earthCanvas.nativeElement) {
       const size = Math.min(window.innerWidth, window.innerHeight) * 0.8;
       this.earthGlobe.init(this.earthCanvas.nativeElement, size, size);
+      
+      // Set initial CSS size to match
+      const canvas = this.earthCanvas.nativeElement;
+      canvas.style.width = size + 'px';
+      canvas.style.height = size + 'px';
+      
+      // Watch for canvas size changes with ResizeObserver
+      this.earthResizeObserver = new ResizeObserver(() => {
+        // Debounce the resize to wait for CSS transition to complete
+        if (this.earthResizeTimer) clearTimeout(this.earthResizeTimer);
+        
+        this.earthResizeTimer = setTimeout(() => {
+          const w = this.earthCanvas.nativeElement.offsetWidth;
+          const h = this.earthCanvas.nativeElement.offsetHeight;
+          if (w > 0 && h > 0) {
+            this.earthGlobe.resize(w, h);
+          }
+        }, 220); // Wait slightly longer than CSS transition (200ms)
+      });
+      this.earthResizeObserver.observe(this.earthCanvas.nativeElement);
     } else {
       console.error('Earth canvas not found!');
     }
@@ -351,6 +375,11 @@ export class App implements AfterViewInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.earthGlobe.dispose();
+    if (this.earthResizeObserver) {
+      this.earthResizeObserver.disconnect();
+      this.earthResizeObserver = null;
+    }
+    if (this.earthResizeTimer) clearTimeout(this.earthResizeTimer);
     window.removeEventListener('keydown', this.onKeyDown as any);
     if (this.resizeDoneTimer) clearTimeout(this.resizeDoneTimer);
     if (this.wheelHandler) window.removeEventListener('wheel', this.wheelHandler as any);
@@ -419,12 +448,24 @@ export class App implements AfterViewInit, OnDestroy {
   onResize() {
     const keepYear = this.yToYearDev(this.CH / 2);
     if (this.resizeDoneTimer) clearTimeout(this.resizeDoneTimer);
+
     this.resizeDoneTimer = setTimeout(() => {
       if (this._ZOOM_ANIM.active) {
         this.TL.unitYears = this._ZOOM_ANIM.endUnit;
         this.currentZoomIdx = this._ZOOM_ANIM.targetIdx;
         this._ZOOM_ANIM.active = false;
       }
+      
+      // Resize Earth globe and update canvas CSS size
+      if (this.earthCanvas && this.earthCanvas.nativeElement) {
+        const size = Math.min(window.innerWidth, window.innerHeight) * 0.8;
+        
+        // Update CSS dimensions so ResizeObserver can detect the change
+        const canvas = this.earthCanvas.nativeElement;
+        canvas.style.width = size + 'px';
+        canvas.style.height = size + 'px';
+      }
+      
       this.applySize(this.viewportW(), this.viewportH());
       this.reanchorGridForCenter(keepYear);
       this.updateScrollBounds();
