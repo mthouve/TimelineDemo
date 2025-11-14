@@ -559,77 +559,10 @@ export class EarthGlobeService {
 
     console.log('Earth mesh created and added to scene');
 
-    // Try to load bathymetry as a water mask for specular (sun reflection on water)
-    this.loadWaterSpecularMask(textureLoader);
+    // Bathymetry-based water mask disabled (we now rely on initial mask from base map)
 
     // Start render loop
     this.animate();
-  }
-
-  /**
-   * Load bathymetry texture and convert to a water-only specular map.
-   * Land -> black, Water -> white. This is used as material.specularMap.
-   */
-  private loadWaterSpecularMask(textureLoader: THREE.TextureLoader): void {
-    // Prefer a local asset if present; otherwise fall back to NASA URL
-    const localUrl = 'assets/gebco_08_rev_bath_3600x1800_color.jpg';
-    const remoteUrl =
-      'https://eoimages.gsfc.nasa.gov/images/imagerecords/73000/73963/gebco_08_rev_bath_3600x1800_color.jpg';
-
-    const processTexture = (texture: THREE.Texture) => {
-      const img = texture.image as HTMLImageElement;
-      const waterMask = this.createWaterMaskTexture(img);
-      // Apply mask to water material so only oceans receive lighting/specular
-      this.waterMaterial.alphaMap = waterMask;
-      this.waterMaterial.specularMap = waterMask;
-      this.waterMaterial.transparent = true;
-      // Disable legacy Phong specular lobes (use shader-based overlay instead)
-      this.waterMaterial.opacity = 0.0;
-      this.waterMaterial.needsUpdate = true;
-      // Ensure correct encoding and update for mask textures
-      waterMask.needsUpdate = true;
-      // Apply same mask to wider lobe
-      this.waterMaterialWide.alphaMap = waterMask;
-      this.waterMaterialWide.specularMap = waterMask;
-      this.waterMaterialWide.transparent = true;
-      // Disable legacy broad lobe as well
-      this.waterMaterialWide.opacity = 0.0;
-      this.waterMaterialWide.needsUpdate = true;
-      // Apply mask to diffuse brightening overlay
-      if (this.waterDiffuseMaterial) {
-        this.waterDiffuseMaterial.alphaMap = waterMask;
-        this.waterDiffuseMaterial.transparent = true;
-        this.waterDiffuseMaterial.opacity = 0.14; // subtle brighten
-        this.waterDiffuseMaterial.needsUpdate = true;
-      }
-      // Apply mask to shader-based specular overlay
-      if (this.waterSpecMaterial) {
-        this.waterSpecMaterial.uniforms['maskMap'].value = waterMask;
-        if (this.waterSpecMaterial.uniforms['hasMask']) {
-          this.waterSpecMaterial.uniforms['hasMask'].value = true;
-        }
-        this.waterSpecMaterial.needsUpdate = true;
-      }
-    };
-
-    // First try local path
-    textureLoader.load(
-      localUrl,
-      (tex) => processTexture(tex),
-      undefined,
-      () => {
-        // If local load fails, try remote with CORS
-        textureLoader.setCrossOrigin('anonymous');
-        textureLoader.load(
-          remoteUrl,
-          (tex) => processTexture(tex),
-          undefined,
-          (err) => {
-            console.warn('Bathymetry load failed; water reflection disabled', err);
-          }
-        );
-      }
-    );
   }
 
   /**
