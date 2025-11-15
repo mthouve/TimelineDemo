@@ -10,11 +10,13 @@ import {
 import { StarfieldRendererService } from './services/starfield-renderer.service';
 import { TimelineDateService, ZoomSpec } from './services/timeline-date.service';
 import { TimelineHudService } from './services/timeline-hud.service';
+import { EarthGlobeService } from './services/earth-globe.service';
 import { ZoomControlComponent } from './zoom-control/zoom-control.component';
 import { SettingsControlComponent } from './settings-control/settings-control.component';
 import { InfoBoxComponent, InfoBoxEntry } from './info-box/info-box.component';
 import { BibleViewerComponent } from './bible-viewer/bible-viewer.component';
 import { CommonModule } from '@angular/common';
+import { TimelinePoint } from './data/timeline-points';
 
 // Animation envelope (typed)
 type ZoomAnim = {
@@ -64,6 +66,7 @@ export class App implements AfterViewInit, OnDestroy {
     private starRender: StarfieldRendererService,
     private dateService: TimelineDateService,
     private hudService: TimelineHudService,
+    private earthGlobe: EarthGlobeService,
     private r2: Renderer2
   ) {
     // Ensure a sensible base page title for tests and initial load
@@ -96,14 +99,40 @@ export class App implements AfterViewInit, OnDestroy {
     const secondaryRange = this.TL.unitYears * 2.0; // within 2 HUD spacings
 
     const nearbyEntries: InfoBoxEntry[] = [];
+    let closestPrimaryWithLocation: (typeof entries)[0] | null = null;
+    let closestDistance = Infinity;
+
     for (const e of entries) {
       const dy = Math.abs(e.yf - centerYF);
       if (dy <= secondaryRange) {
+        const isPrimary = dy <= primaryRange;
         nearbyEntries.push({
           ...e,
-          isPrimary: dy <= primaryRange,
+          isPrimary,
         });
+
+        // Track closest primary entry with location for Earth rotation
+        if (isPrimary && e.location && dy < closestDistance) {
+          closestPrimaryWithLocation = e;
+          closestDistance = dy;
+        }
       }
+    }
+
+    // Rotate Earth to show location if we have a primary entry with coordinates
+    if (closestPrimaryWithLocation?.location) {
+      this.earthGlobe.rotateTo(
+        closestPrimaryWithLocation.location.lon,
+        closestPrimaryWithLocation.location.lat
+      );
+
+      // Calculate marker opacity based on distance (fade out over 2x primary range)
+      const fadeRange = primaryRange * 2.0;
+      const opacity = fadeRange > 0 ? 1.0 - Math.min(closestDistance / fadeRange, 1.0) : 0;
+      this.earthGlobe.setMarkerOpacity(opacity);
+    } else {
+      // No location in view, hide marker
+      this.earthGlobe.setMarkerOpacity(0);
     }
 
     // Already in chronological order, just limit total count
@@ -123,6 +152,7 @@ export class App implements AfterViewInit, OnDestroy {
   // ── View refs ─────────────────────────────────────────────────────────────────
   @ViewChild('starHost', { static: true }) starHost!: ElementRef<HTMLDivElement>;
   @ViewChild('starCanvas', { static: true }) starCanvas!: ElementRef<HTMLCanvasElement>;
+  @ViewChild('earthCanvas', { static: false }) earthCanvas!: ElementRef<HTMLCanvasElement>;
   @ViewChild('centerline', { static: true }) centerline!: ElementRef<HTMLCanvasElement>;
   @ViewChild('timeline', { static: true }) timeline!: ElementRef<HTMLCanvasElement>;
   @ViewChild(ZoomControlComponent) zoomUi?: ZoomControlComponent;
@@ -174,7 +204,7 @@ export class App implements AfterViewInit, OnDestroy {
   }> = [];
 
   // ── Data ──────────────────────────────────────────────────────────────────────
-  private TIMELINE_POINTS: Record<string, string>;
+  private TIMELINE_POINTS: Record<string, TimelinePoint>;
 
   // ── Sizing ────────────────────────────────────────────────────────────────────
   private dpr = Math.max(1, window.devicePixelRatio || 1);
@@ -218,8 +248,12 @@ export class App implements AfterViewInit, OnDestroy {
 
   private readonly VWIN_MULT = 17;
   private readonly EDGE_EPS = 2;
+
+  // Earth canvas resize observer
+  private earthResizeObserver: ResizeObserver | null = null;
+  private earthResizeTimer: any = null;
   private resizeDoneTimer: any = null;
-  private readonly RESIZE_DEBOUNCE_MS = 250;
+  private readonly RESIZE_DEBOUNCE_MS = 150;
 
   // Raw listeners
   private wheelHandler?: (e: WheelEvent) => void;
@@ -267,6 +301,34 @@ export class App implements AfterViewInit, OnDestroy {
     this.starRender.init(this.starCanvas.nativeElement, 512);
     this.starRender.setDevicePixelRatio(this.DPR);
 
+    // Initialize Earth globe with responsive size (80vmin - 80% of smaller dimension)
+    if (this.earthCanvas && this.earthCanvas.nativeElement) {
+      const size = Math.min(window.innerWidth, window.innerHeight) * 0.8;
+      this.earthGlobe.init(this.earthCanvas.nativeElement, size, size);
+
+      // Set initial CSS size to match
+      const canvas = this.earthCanvas.nativeElement;
+      canvas.style.width = size + 'px';
+      canvas.style.height = size + 'px';
+
+      // Watch for canvas size changes with ResizeObserver
+      this.earthResizeObserver = new ResizeObserver(() => {
+        // Debounce the resize to wait for CSS transition to complete
+        if (this.earthResizeTimer) clearTimeout(this.earthResizeTimer);
+
+        this.earthResizeTimer = setTimeout(() => {
+          const w = this.earthCanvas.nativeElement.offsetWidth;
+          const h = this.earthCanvas.nativeElement.offsetHeight;
+          if (w > 0 && h > 0) {
+            this.earthGlobe.resize(w, h);
+          }
+        }, 220); // Wait slightly longer than CSS transition (200ms)
+      });
+      this.earthResizeObserver.observe(this.earthCanvas.nativeElement);
+    } else {
+      console.error('Earth canvas not found!');
+    }
+
     this.sizeAll();
 
     this.TL.unitYears = this.zoomLevels[this.currentZoomIdx].unit;
@@ -312,6 +374,12 @@ export class App implements AfterViewInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.earthGlobe.dispose();
+    if (this.earthResizeObserver) {
+      this.earthResizeObserver.disconnect();
+      this.earthResizeObserver = null;
+    }
+    if (this.earthResizeTimer) clearTimeout(this.earthResizeTimer);
     window.removeEventListener('keydown', this.onKeyDown as any);
     if (this.resizeDoneTimer) clearTimeout(this.resizeDoneTimer);
     if (this.wheelHandler) window.removeEventListener('wheel', this.wheelHandler as any);
@@ -380,12 +448,24 @@ export class App implements AfterViewInit, OnDestroy {
   onResize() {
     const keepYear = this.yToYearDev(this.CH / 2);
     if (this.resizeDoneTimer) clearTimeout(this.resizeDoneTimer);
+
     this.resizeDoneTimer = setTimeout(() => {
       if (this._ZOOM_ANIM.active) {
         this.TL.unitYears = this._ZOOM_ANIM.endUnit;
         this.currentZoomIdx = this._ZOOM_ANIM.targetIdx;
         this._ZOOM_ANIM.active = false;
       }
+
+      // Resize Earth globe and update canvas CSS size
+      if (this.earthCanvas && this.earthCanvas.nativeElement) {
+        const size = Math.min(window.innerWidth, window.innerHeight) * 0.8;
+
+        // Update CSS dimensions so ResizeObserver can detect the change
+        const canvas = this.earthCanvas.nativeElement;
+        canvas.style.width = size + 'px';
+        canvas.style.height = size + 'px';
+      }
+
       this.applySize(this.viewportW(), this.viewportH());
       this.reanchorGridForCenter(keepYear);
       this.updateScrollBounds();
@@ -620,11 +700,25 @@ export class App implements AfterViewInit, OnDestroy {
   }
 
   private getEntries() {
-    const out: { label: string; when: string; yf: number; yearOnly: boolean }[] = [];
+    const out: {
+      label: string;
+      when: string;
+      yf: number;
+      yearOnly: boolean;
+      location?: { lat: number; lon: number; name?: string };
+    }[] = [];
     for (const key of Object.keys(this.TIMELINE_POINTS)) {
-      const when = this.TIMELINE_POINTS[key];
+      const point = this.TIMELINE_POINTS[key];
       const { yf, yearOnly } = this.yearParseWithFlag(key);
-      if (!isNaN(yf)) out.push({ label: key, when, yf, yearOnly });
+      if (!isNaN(yf)) {
+        out.push({
+          label: key,
+          when: point.description,
+          yf,
+          yearOnly,
+          location: point.location,
+        });
+      }
     }
     out.sort((a, b) => a.yf - b.yf);
     return out;
