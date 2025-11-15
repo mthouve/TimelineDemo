@@ -307,10 +307,10 @@ export class App implements AfterViewInit, OnDestroy {
       // Calculate timeline panel dimensions (60vw x 100vh on desktop)
       const canvasWidth = window.innerWidth * 0.6;
       const canvasHeight = window.innerHeight;
-      
-      this.earthGlobe.init(canvas, canvasWidth, canvasHeight);
 
-      // Watch for canvas size changes with ResizeObserver
+      this.earthGlobe.init(canvas, canvasWidth, canvasHeight);
+      // Set Earth rotation to 1 per 60 seconds for slow visual inspection of starfield
+      this.earthGlobe.setEarthRotationsPerSecond(1 / 600); // Watch for canvas size changes with ResizeObserver
       this.earthResizeObserver = new ResizeObserver(() => {
         // Debounce the resize
         if (this.earthResizeTimer) clearTimeout(this.earthResizeTimer);
