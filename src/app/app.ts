@@ -1105,20 +1105,20 @@ export class App implements AfterViewInit, OnDestroy {
   }
 
   private ensureScrollRoomFromBounds() {
-    const demo = document.querySelector('.demo') as HTMLElement | null;
-    if (!demo) return;
+    const scrollbounds = document.querySelector('.scrollbounds') as HTMLElement | null;
+    if (!scrollbounds) return;
     const vv = (window as any).visualViewport;
     const vh = vv?.height || window.innerHeight || this.H / this.DPR;
 
     if (this.useVirtualWindow) {
       const vwinPx = Math.max(this.VWIN_MULT * vh, vh);
-      demo.style.minHeight = `${vwinPx}px`;
+      scrollbounds.style.minHeight = `${vwinPx}px`;
       this.SCROLL_MIN = 0;
       this.SCROLL_MAX = Math.max(0, vwinPx - vh);
       this.SCROLL_SHIFT = 0;
     } else {
       const needed = Math.ceil((this.SCROLL_MAX ?? 0) - (this.SCROLL_MIN ?? 0) + vh);
-      demo.style.minHeight = Math.max(needed, vh) + 'px';
+      scrollbounds.style.minHeight = Math.max(needed, vh) + 'px';
     }
   }
 
