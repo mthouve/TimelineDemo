@@ -25,7 +25,7 @@ app-bible-viewer {
   min-width: 320px;
   min-height: 100vh;
   position: relative;
-  background: #0a0a0a;
+  background: #000; /* star background comes from 3D scene for depth */
   z-index: 1;
 }
 
@@ -76,6 +76,8 @@ app-bible-viewer {
   overflow: hidden;
   z-index: 0;
   pointer-events: none;
+  /* Hide legacy canvas starfield (replaced by 3D starmap inside Earth canvas) */
+  display: none !important;
 }
 
 .timeline-panel #centerline,
@@ -88,18 +90,24 @@ app-bible-viewer {
   pointer-events: none;
 }
 
-/* Earth globe canvas */
+/* Earth globe canvas - fills entire timeline panel for full starfield view */
 .earth-canvas {
   position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  /* Size controlled by JavaScript in resize handler */
-  z-index: 0; /* Below starfield so it appears behind stars */
+  top: 0;
+  bottom: 0;
+  left: 40vw; /* align with sidebar */
+  right: 0;
+  width: 60vw; /* explicit width */
+  height: 100vh; /* explicit height */
+  z-index: 0; /* Below HUD and timeline layers */
   pointer-events: none; /* Allow clicks to pass through to timeline */
-  
-  /* Smooth resize transitions */
-  transition: width 0.2s ease-out, height 0.2s ease-out;
+}
+
+@media (max-width: 900px) {
+  .earth-canvas {
+    left: 0; /* full width on mobile */
+    width: 100vw;
+  }
 }
 
 /* Ensure dynamically created HUD canvases align with the timeline area */

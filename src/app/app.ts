@@ -301,19 +301,18 @@ export class App implements AfterViewInit, OnDestroy {
     this.starRender.init(this.starCanvas.nativeElement, 512);
     this.starRender.setDevicePixelRatio(this.DPR);
 
-    // Initialize Earth globe with responsive size (80vmin - 80% of smaller dimension)
+    // Initialize Earth globe - canvas now fills timeline panel for full starfield view
     if (this.earthCanvas && this.earthCanvas.nativeElement) {
-      const size = Math.min(window.innerWidth, window.innerHeight) * 0.8;
-      this.earthGlobe.init(this.earthCanvas.nativeElement, size, size);
-
-      // Set initial CSS size to match
       const canvas = this.earthCanvas.nativeElement;
-      canvas.style.width = size + 'px';
-      canvas.style.height = size + 'px';
+      // Calculate timeline panel dimensions (60vw x 100vh on desktop)
+      const canvasWidth = window.innerWidth * 0.6;
+      const canvasHeight = window.innerHeight;
+      
+      this.earthGlobe.init(canvas, canvasWidth, canvasHeight);
 
       // Watch for canvas size changes with ResizeObserver
       this.earthResizeObserver = new ResizeObserver(() => {
-        // Debounce the resize to wait for CSS transition to complete
+        // Debounce the resize
         if (this.earthResizeTimer) clearTimeout(this.earthResizeTimer);
 
         this.earthResizeTimer = setTimeout(() => {
@@ -322,7 +321,7 @@ export class App implements AfterViewInit, OnDestroy {
           if (w > 0 && h > 0) {
             this.earthGlobe.resize(w, h);
           }
-        }, 220); // Wait slightly longer than CSS transition (200ms)
+        }, 150);
       });
       this.earthResizeObserver.observe(this.earthCanvas.nativeElement);
     } else {
