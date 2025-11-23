@@ -10,7 +10,7 @@ app-bible-viewer {
   position: fixed;
   top: 0;
   left: 0;
-  width: 40vw; /* keep sidebar proportional and predictable */
+  width: 30vw; /* keep sidebar proportional and predictable */
   min-width: 320px;
   height: 100vh;
   border-right: 1px solid rgba(140, 70, 10, 0.5);
@@ -59,7 +59,7 @@ app-bible-viewer {
 
 /* Canvases positioned within timeline panel area */
 .timeline-panel .starhost {
-  position: fixed;
+  position: relative;
   top: 0;
   bottom: 0;
   left: 40vw; /* align with sidebar */
@@ -68,7 +68,7 @@ app-bible-viewer {
   z-index: 0;
   pointer-events: none;
   /* Hide legacy canvas starfield (replaced by 3D starmap inside Earth canvas) */
-  display: none !important;
+  // display: none !important;
 }
 
 .timeline-panel #centerline,
@@ -82,23 +82,11 @@ app-bible-viewer {
 }
 
 /* Earth globe canvas - fills entire timeline panel for full starfield view */
-.earth-canvas {
-  position: fixed;
-  top: 0;
-  bottom: 0;
-  left: 40vw; /* align with sidebar */
-  right: 0;
-  width: 60vw; /* explicit width */
-  height: 100vh; /* explicit height */
-  z-index: 0; /* Below HUD and timeline layers */
-  pointer-events: none; /* Allow clicks to pass through to timeline */
-}
+/* Note: SpaceSceneComponent now handles its own styling via host component styles */
+/* Legacy .earth-canvas class removed - component uses app-space-scene selector */
 
 @media (max-width: 900px) {
-  .earth-canvas {
-    left: 0; /* full width on mobile */
-    width: 100vw;
-  }
+  /* Mobile adjustments handled in SpaceSceneComponent */
 }
 
 /* Ensure dynamically created HUD canvases align with the timeline area */

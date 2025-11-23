@@ -7,11 +7,14 @@ export interface TimelinePointLocation {
 export interface TimelinePoint {
   description: string;
   location?: TimelinePointLocation;
+  youtubeId?: string;
 }
 
 export const TIMELINE_POINTS: Record<string, TimelinePoint> = {
   'January 1, 150 B.C.E.': {
     description: 'Something happened on this date.',
+    location: { lat: 31.7683, lon: 35.2137, name: 'Jerusalem' },
+    youtubeId: 'LUxFzh8r384',
   },
   '1 B.C.E.': {
     description: 'A very important event happened this year.',

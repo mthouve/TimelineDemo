@@ -10,7 +10,7 @@ import {
 import { StarfieldRendererService } from './services/starfield-renderer.service';
 import { TimelineDateService, ZoomSpec } from './services/timeline-date.service';
 import { TimelineHudService } from './services/timeline-hud.service';
-import { EarthGlobeService } from './services/earth-globe.service';
+import { SpaceSceneComponent } from './components/space-scene/space-scene.component';
 import { ZoomControlComponent } from './zoom-control/zoom-control.component';
 import { SettingsControlComponent } from './settings-control/settings-control.component';
 import { InfoBoxComponent, InfoBoxEntry } from './info-box/info-box.component';
@@ -58,6 +58,7 @@ type ZoomAnim = {
     SettingsControlComponent,
     InfoBoxComponent,
     BibleViewerComponent,
+    SpaceSceneComponent,
     CommonModule,
   ],
 })
@@ -66,7 +67,6 @@ export class App implements AfterViewInit, OnDestroy {
     private starRender: StarfieldRendererService,
     private dateService: TimelineDateService,
     private hudService: TimelineHudService,
-    private earthGlobe: EarthGlobeService,
     private r2: Renderer2
   ) {
     // Ensure a sensible base page title for tests and initial load
@@ -121,18 +121,24 @@ export class App implements AfterViewInit, OnDestroy {
 
     // Rotate Earth to show location if we have a primary entry with coordinates
     if (closestPrimaryWithLocation?.location) {
-      this.earthGlobe.rotateTo(
-        closestPrimaryWithLocation.location.lon,
-        closestPrimaryWithLocation.location.lat
-      );
+      if (this.spaceScene) {
+        this.spaceScene.rotateTo(
+          closestPrimaryWithLocation.location.lon,
+          closestPrimaryWithLocation.location.lat
+        );
+      }
 
       // Calculate marker opacity based on distance (fade out over 2x primary range)
       const fadeRange = primaryRange * 2.0;
       const opacity = fadeRange > 0 ? 1.0 - Math.min(closestDistance / fadeRange, 1.0) : 0;
-      this.earthGlobe.setMarkerOpacity(opacity);
+      if (this.spaceScene) {
+        this.spaceScene.setMarkerOpacity(opacity);
+      }
     } else {
       // No location in view, hide marker
-      this.earthGlobe.setMarkerOpacity(0);
+      if (this.spaceScene) {
+        this.spaceScene.setMarkerOpacity(0);
+      }
     }
 
     // Already in chronological order, just limit total count
@@ -152,7 +158,7 @@ export class App implements AfterViewInit, OnDestroy {
   // ── View refs ─────────────────────────────────────────────────────────────────
   @ViewChild('starHost', { static: true }) starHost!: ElementRef<HTMLDivElement>;
   @ViewChild('starCanvas', { static: true }) starCanvas!: ElementRef<HTMLCanvasElement>;
-  @ViewChild('earthCanvas', { static: false }) earthCanvas!: ElementRef<HTMLCanvasElement>;
+  @ViewChild(SpaceSceneComponent, { static: false }) spaceScene!: SpaceSceneComponent;
   @ViewChild('centerline', { static: true }) centerline!: ElementRef<HTMLCanvasElement>;
   @ViewChild('timeline', { static: true }) timeline!: ElementRef<HTMLCanvasElement>;
   @ViewChild(ZoomControlComponent) zoomUi?: ZoomControlComponent;
@@ -301,31 +307,10 @@ export class App implements AfterViewInit, OnDestroy {
     this.starRender.init(this.starCanvas.nativeElement, 512);
     this.starRender.setDevicePixelRatio(this.DPR);
 
-    // Initialize Earth globe - canvas now fills timeline panel for full starfield view
-    if (this.earthCanvas && this.earthCanvas.nativeElement) {
-      const canvas = this.earthCanvas.nativeElement;
-      // Calculate timeline panel dimensions (60vw x 100vh on desktop)
-      const canvasWidth = window.innerWidth * 0.6;
-      const canvasHeight = window.innerHeight;
-
-      this.earthGlobe.init(canvas, canvasWidth, canvasHeight);
-      // Set Earth rotation to 1 per 60 seconds for slow visual inspection of starfield
-      this.earthGlobe.setEarthRotationsPerSecond(1 / 600); // Watch for canvas size changes with ResizeObserver
-      this.earthResizeObserver = new ResizeObserver(() => {
-        // Debounce the resize
-        if (this.earthResizeTimer) clearTimeout(this.earthResizeTimer);
-
-        this.earthResizeTimer = setTimeout(() => {
-          const w = this.earthCanvas.nativeElement.offsetWidth;
-          const h = this.earthCanvas.nativeElement.offsetHeight;
-          if (w > 0 && h > 0) {
-            this.earthGlobe.resize(w, h);
-          }
-        }, 150);
-      });
-      this.earthResizeObserver.observe(this.earthCanvas.nativeElement);
-    } else {
-      console.error('Earth canvas not found!');
+    // Space scene component handles its own initialization
+    // Set Earth rotation speed after component is ready
+    if (this.spaceScene) {
+      this.spaceScene.setEarthRotationsPerSecond(1 / 60);
     }
 
     this.sizeAll();
@@ -373,7 +358,7 @@ export class App implements AfterViewInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
-    this.earthGlobe.dispose();
+    // Space scene component handles its own cleanup
     if (this.earthResizeObserver) {
       this.earthResizeObserver.disconnect();
       this.earthResizeObserver = null;
@@ -455,15 +440,7 @@ export class App implements AfterViewInit, OnDestroy {
         this._ZOOM_ANIM.active = false;
       }
 
-      // Resize Earth globe and update canvas CSS size
-      if (this.earthCanvas && this.earthCanvas.nativeElement) {
-        const size = Math.min(window.innerWidth, window.innerHeight) * 0.8;
-
-        // Update CSS dimensions so ResizeObserver can detect the change
-        const canvas = this.earthCanvas.nativeElement;
-        canvas.style.width = size + 'px';
-        canvas.style.height = size + 'px';
-      }
+      // Space scene component handles its own resize via ResizeObserver
 
       this.applySize(this.viewportW(), this.viewportH());
       this.reanchorGridForCenter(keepYear);
@@ -699,13 +676,10 @@ export class App implements AfterViewInit, OnDestroy {
   }
 
   private getEntries() {
-    const out: {
-      label: string;
-      when: string;
-      yf: number;
+    const out: (InfoBoxEntry & {
       yearOnly: boolean;
       location?: { lat: number; lon: number; name?: string };
-    }[] = [];
+    })[] = [];
     for (const key of Object.keys(this.TIMELINE_POINTS)) {
       const point = this.TIMELINE_POINTS[key];
       const { yf, yearOnly } = this.yearParseWithFlag(key);
@@ -716,6 +690,8 @@ export class App implements AfterViewInit, OnDestroy {
           yf,
           yearOnly,
           location: point.location,
+          youtubeId: point.youtubeId,
+          isPrimary: false, // will be set later in updateInfoBox
         });
       }
     }
