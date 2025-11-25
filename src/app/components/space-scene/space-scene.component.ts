@@ -362,7 +362,7 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     });
     this.cloudsMesh = new THREE.Mesh(this.earthGeometry, this.cloudsMaterial);
     this.cloudsMesh.scale.setScalar(1.003); // just above the surface
-    this.cloudsMesh.renderOrder = 30;
+    this.cloudsMesh.renderOrder = 20;
     this.earthGroup.add(this.cloudsMesh);
 
     // Add atmosphere: blue at edge, clear at center (limb-brightened)
@@ -407,7 +407,7 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     });
     this.atmosphereMesh = new THREE.Mesh(this.earthGeometry, this.atmosphereMaterial);
     this.atmosphereMesh.scale.setScalar(1.05);
-    this.atmosphereMesh.renderOrder = 20;
+    this.atmosphereMesh.renderOrder = 30;
     this.earthGroup.add(this.atmosphereMesh);
     this.scene.add(this.earthGroup);
   }
@@ -426,7 +426,7 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
 
     // Animate clouds and cloud shadows (slow rotation)
     if (this.cloudsMesh) {
-      this.cloudsMesh.rotation.y += 0.01 * clampedDt;
+      this.cloudsMesh.rotation.y += 0.0015 * clampedDt; // Realistically slow
     }
 
     // Earth rotation animation

@@ -48,7 +48,7 @@ export class YoutubeEmbedComponent {
   ngOnChanges(changes: SimpleChanges) {
     if (changes['videoId'] && this.videoId) {
       this.safeUrl = this.sanitizer.bypassSecurityTrustResourceUrl(
-        `https://www.youtube.com/embed/${this.videoId}?autoplay=1`
+        `https://www.youtube.com/embed/${this.videoId}`
       );
     }
   }

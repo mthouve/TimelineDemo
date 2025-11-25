@@ -310,7 +310,7 @@ export class App implements AfterViewInit, OnDestroy {
     // Space scene component handles its own initialization
     // Set Earth rotation speed after component is ready
     if (this.spaceScene) {
-      this.spaceScene.setEarthRotationsPerSecond(1 / 60);
+      this.spaceScene.setEarthRotationsPerSecond(1 / 3600);
     }
 
     this.sizeAll();
@@ -690,7 +690,7 @@ export class App implements AfterViewInit, OnDestroy {
           yf,
           yearOnly,
           location: point.location,
-          youtubeId: point.youtubeId,
+          sources: point.sources,
           isPrimary: false, // will be set later in updateInfoBox
         });
       }

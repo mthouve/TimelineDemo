@@ -2,12 +2,13 @@ import { Component, Input } from '@angular/core';
 import { YoutubeEmbedComponent } from '../components/youtube-embed/youtube-embed.component';
 import { CommonModule } from '@angular/common';
 
+import { TimelineSource } from '../data/timeline-points';
 export interface InfoBoxEntry {
   label: string;
   when: string;
   yf: number;
   isPrimary: boolean;
-  youtubeId?: string;
+  sources?: TimelineSource[];
 }
 
 @Component({
@@ -26,16 +27,60 @@ export interface InfoBoxEntry {
           >
             <div class="when">{{ e.label }}</div>
             <div class="desc">{{ e.when }}</div>
-            <ng-container *ngIf="e.youtubeId">
-              <button
-                class="yt-link"
-                (click)="showYoutube = showYoutube === e.youtubeId ? null : e.youtubeId"
-                type="button"
-              >
-                ▶ Watch video
-              </button>
-              <div class="yt-embed" [hidden]="showYoutube !== e.youtubeId">
-                <app-youtube-embed [videoId]="e.youtubeId"></app-youtube-embed>
+            <ng-container *ngIf="e.sources && e.sources.length">
+              <div class="sources-list">
+                <ng-container *ngFor="let src of e.sources">
+                  <button
+                    *ngIf="src.type === 'youtube'"
+                    class="yt-link icon-link"
+                    [title]="src.title"
+                    (click)="
+                      showYoutube =
+                        showYoutube === (src.youtubeId || '') ? null : src.youtubeId || ''
+                    "
+                    type="button"
+                  >
+                    <span class="icon youtube-icon" aria-label="YouTube">▶</span>
+                    <span class="icon-title">{{ src.title }}</span>
+                  </button>
+                  <a
+                    *ngIf="
+                      src.type === 'link' &&
+                      src.url &&
+                      src.title.toLowerCase().includes('wikipedia')
+                    "
+                    class="ext-link icon-link"
+                    [href]="src.url"
+                    [title]="src.title"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <span class="icon wikipedia-icon" aria-label="Wikipedia">🛈</span>
+                    <span class="icon-title">{{ src.title }}</span>
+                  </a>
+                  <a
+                    *ngIf="
+                      src.type === 'link' &&
+                      src.url &&
+                      !src.title.toLowerCase().includes('wikipedia')
+                    "
+                    class="ext-link icon-link"
+                    [href]="src.url"
+                    [title]="src.title"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <span class="icon web-icon" aria-label="Web">🌐</span>
+                    <span class="icon-title">{{ src.title }}</span>
+                  </a>
+                  <div
+                    class="yt-embed"
+                    [hidden]="showYoutube !== src.youtubeId"
+                    *ngIf="src.type === 'youtube' && src.youtubeId"
+                  >
+                    <app-youtube-embed [videoId]="src.youtubeId"></app-youtube-embed>
+                  </div>
+                </ng-container>
               </div>
             </ng-container>
           </div>
@@ -46,7 +91,7 @@ export interface InfoBoxEntry {
   `,
   styles: [
     `
-      .yt-link {
+      .icon-link {
         pointer-events: auto;
         margin-top: 8px;
         background: #222;
@@ -54,16 +99,48 @@ export interface InfoBoxEntry {
         border: none;
         border-radius: 4px;
         padding: 4px 10px;
-        font-size: 13px;
+        font-size: 15px;
         cursor: pointer;
-        transition: background 0.2s;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        transition: background 0.2s, color 0.2s;
+        margin-left: 6px;
       }
-      .yt-link:hover {
+      .icon-link:hover {
         background: #333;
+        color: #fff;
+      }
+      .icon {
+        font-size: 18px;
+        vertical-align: middle;
+      }
+      .youtube-icon {
+        color: rgba(255, 200, 150, 0.92);
+      }
+      .wikipedia-icon {
+        color: rgba(255, 200, 150, 0.92);
+      }
+      .web-icon {
+        color: rgba(255, 200, 150, 0.92);
+      }
+      .icon-title {
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell;
+        font-size: 13px;
+        color: rgba(255, 200, 150, 0.92);
+        white-space: nowrap;
+      }
+      .sources-list {
+        margin-top: 8px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
       }
       .yt-embed {
         pointer-events: auto;
         margin-top: 10px;
+        width: 100%;
       }
       .info-box {
         position: fixed;
@@ -124,7 +201,10 @@ export class InfoBoxComponent {
   showYoutube: string | null = null;
 
   trackByYoutubeOrLabel(index: number, entry: InfoBoxEntry): string {
-    // Prefer youtubeId if present, otherwise use label as unique key
-    return entry.youtubeId || entry.label;
+    // Use label, or if sources exist, use label plus all source labels
+    if (entry.sources && entry.sources.length) {
+      return entry.label + '-' + entry.sources.map((s) => s.label).join('-');
+    }
+    return entry.label;
   }
 }
