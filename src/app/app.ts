@@ -91,8 +91,9 @@ export class App implements AfterViewInit, OnDestroy {
     const book = match[1];
     const chapter = Number(match[2]);
     const verse = match[3] ? Number(match[3]) : undefined;
+    const endVerse = match[4] ? Number(match[4]) : undefined;
     // Use BibleViewerComponent's goToReference
-    this.bibleViewer.goToReference({ book, chapter, verse });
+    this.bibleViewer.goToReference({ book, chapter, verse, endVerse });
     // Optionally, trigger highlight/scroll logic here (to be implemented in BibleViewerComponent)
   }
 

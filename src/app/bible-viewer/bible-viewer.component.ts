@@ -1,4 +1,13 @@
-import { Component, Input, Signal, signal, OnInit, ElementRef, ViewChild } from '@angular/core';
+import {
+  Component,
+  Input,
+  Signal,
+  signal,
+  OnInit,
+  ElementRef,
+  ViewChild,
+  AfterViewInit,
+} from '@angular/core';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -19,7 +28,12 @@ import {
   styleUrls: ['./bible-viewer.component.scss'],
   imports: [CommonModule, FormsModule],
 })
-export class BibleViewerComponent implements OnInit {
+export class BibleViewerComponent implements OnInit, AfterViewInit {
+  /**
+   * Optionally set this input to highlight a passage on load (e.g. { book: 'Luke', chapter: 5, verse: 17, endVerse: 26 })
+   */
+  @Input() initialHighlightReference?: BibleReference;
+  private initialHighlightTriggered = false;
   @ViewChild('bibleContent', { read: ElementRef }) bibleContentEl?: ElementRef<HTMLElement>;
   @ViewChild('searchResultsContainer', { read: ElementRef })
   searchResultsEl?: ElementRef<HTMLElement>;
@@ -48,6 +62,16 @@ export class BibleViewerComponent implements OnInit {
     const genesis = this.books().find((b: BibleBook) => b.name === 'Genesis') ?? null;
     this.selectBook(genesis);
     this.selectChapter(1);
+  }
+
+  ngAfterViewInit() {
+    // If initialHighlightReference is set, trigger highlight after view is ready
+    if (this.initialHighlightReference && !this.initialHighlightTriggered) {
+      setTimeout(() => {
+        this.goToReference(this.initialHighlightReference!);
+        this.initialHighlightTriggered = true;
+      }, 0);
+    }
   }
 
   selectBook(book: BibleBook | null) {
@@ -104,8 +128,9 @@ export class BibleViewerComponent implements OnInit {
   highlightAnimFrame?: number;
   highlightOpacity = 0;
   highlightTargetOpacity = 0;
-  highlightEaseDuration = 1600; // ms for ease in/out
-  highlightColor = 'rgba(255, 170, 80, 0.25)'; // dim orange
+  highlightEaseDuration = 2000; // ms for ease in/out (slower)
+  scrollDuration = 1200; // ms for custom smooth scroll
+  highlightColor = 'rgba(80, 50, 0, 0.32)'; // darker, less saturated orange
 
   goToReference(ref: BibleReference) {
     const book = this.books().find((b: BibleBook) => b.name === ref.book);
@@ -130,31 +155,66 @@ export class BibleViewerComponent implements OnInit {
     // Determine range
     const start = ref.verse || 1;
     const end = ref.endVerse || start;
-    for (let v = start; v <= end; v++) this.highlightedVerses[v] = true;
+    // Highlight all verses in the range that exist in the current chapter
+    const versesArr = this.verses();
+    for (const v of versesArr) {
+      if (v.verse >= start && v.verse <= end) {
+        this.highlightedVerses[v.verse] = true;
+      }
+    }
+
+    // Start highlight animation immediately for all verses in range
+    this.animateHighlightIn(start, end);
 
     // Find first verse element
     const container = this.bibleContentEl?.nativeElement;
     if (!container) return;
     const verseEls = Array.from(container.querySelectorAll('.bible-verse')) as HTMLElement[];
-    const firstIdx = this.verses().findIndex((v) => v.verse === start);
+    const firstIdx = versesArr.findIndex((v) => v.verse === start);
     if (firstIdx < 0) return;
     const verseEl = verseEls[firstIdx];
     if (!verseEl) return;
 
-    // Scroll smoothly to verse
-    verseEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // Custom smooth scroll to verse (centered)
+    const containerRect = container.getBoundingClientRect();
+    const verseRect = verseEl.getBoundingClientRect();
+    const scrollTop = container.scrollTop;
+    const offset =
+      verseRect.top - containerRect.top - container.clientHeight / 2 + verseRect.height / 2;
+    const targetScroll = scrollTop + offset;
+    const startScroll = scrollTop;
+    const duration = this.scrollDuration;
+    const ease = (t: number) => (t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t);
+    const scrollStartTime = performance.now();
+    const animateScroll = (now: number) => {
+      const t = Math.min(1, (now - scrollStartTime) / duration);
+      container.scrollTop = startScroll + (targetScroll - startScroll) * ease(t);
+      if (t < 1) {
+        requestAnimationFrame(animateScroll);
+      } else {
+        container.scrollTop = targetScroll;
+      }
+    };
+    animateScroll(scrollStartTime);
+  }
 
-    // Animate highlight in
+  animateHighlightIn(start: number, end: number) {
+    // Animate highlight in for all highlighted verses
     const ease = (t: number) => (t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t);
     const startTime = performance.now();
     const animateIn = (now: number) => {
       const t = Math.min(1, (now - startTime) / this.highlightEaseDuration);
       this.highlightOpacity = ease(t) * this.highlightTargetOpacity;
+      // Update all highlighted verses' opacity
+      for (let v = start; v <= end; v++) {
+        if (this.highlightedVerses[v]) {
+          // No-op: the template uses highlightOpacity for all highlighted
+        }
+      }
       if (t < 1) {
         this.highlightAnimFrame = requestAnimationFrame(animateIn);
       } else {
         this.highlightOpacity = this.highlightTargetOpacity;
-        // Hold highlight for 4s, then fade out
         this.highlightAnimTimeout = setTimeout(() => this.fadeOutHighlight(), 4000);
       }
     };
