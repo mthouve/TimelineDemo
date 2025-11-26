@@ -35,7 +35,7 @@ export class BibleViewerComponent implements OnInit, AfterViewInit {
   lastBookIndex: number | null = null;
   lastChapter: number | null = null;
   isFirstLoad: boolean = true;
-// ...existing code...
+  // ...existing code...
   /**
    * Optionally set this input to highlight a passage on load (e.g. { book: 'Luke', chapter: 5, verse: 17, endVerse: 26 })
    */
@@ -83,7 +83,7 @@ export class BibleViewerComponent implements OnInit, AfterViewInit {
 
   selectBook(book: BibleBook | null) {
     const booksArr = this.books();
-    const newBookIdx = book ? booksArr.findIndex(b => b.name === book.name) : -1;
+    const newBookIdx = book ? booksArr.findIndex((b) => b.name === book.name) : -1;
     let direction: 'left' | 'right' | null = null;
     if (this.lastBookIndex !== null && newBookIdx !== -1) {
       direction = newBookIdx > this.lastBookIndex ? 'left' : 'right';
@@ -175,8 +175,10 @@ export class BibleViewerComponent implements OnInit, AfterViewInit {
     if (!book) return;
     const currentBook = this.selectedBook();
     const currentChapter = this.selectedChapter();
-    const newBookIdx = booksArr.findIndex(b => b.name === book.name);
-    const currentBookIdx = currentBook ? booksArr.findIndex(b => b.name === currentBook.name) : -1;
+    const newBookIdx = booksArr.findIndex((b) => b.name === book.name);
+    const currentBookIdx = currentBook
+      ? booksArr.findIndex((b) => b.name === currentBook.name)
+      : -1;
     const changingBook = !currentBook || currentBook.name !== book.name;
     const changingChapter = currentChapter !== ref.chapter;
 
