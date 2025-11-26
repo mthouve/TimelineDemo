@@ -10,7 +10,7 @@ import {
 import { StarfieldRendererService } from './services/starfield-renderer.service';
 import { TimelineDateService, ZoomSpec } from './services/timeline-date.service';
 import { TimelineHudService } from './services/timeline-hud.service';
-import { EarthGlobeService } from './services/earth-globe.service';
+import { SpaceSceneComponent } from './components/space-scene/space-scene.component';
 import { ZoomControlComponent } from './zoom-control/zoom-control.component';
 import { SettingsControlComponent } from './settings-control/settings-control.component';
 import { InfoBoxComponent, InfoBoxEntry } from './info-box/info-box.component';
@@ -58,6 +58,7 @@ type ZoomAnim = {
     SettingsControlComponent,
     InfoBoxComponent,
     BibleViewerComponent,
+    SpaceSceneComponent,
     CommonModule,
   ],
 })
@@ -66,7 +67,6 @@ export class App implements AfterViewInit, OnDestroy {
     private starRender: StarfieldRendererService,
     private dateService: TimelineDateService,
     private hudService: TimelineHudService,
-    private earthGlobe: EarthGlobeService,
     private r2: Renderer2
   ) {
     // Ensure a sensible base page title for tests and initial load
@@ -121,18 +121,24 @@ export class App implements AfterViewInit, OnDestroy {
 
     // Rotate Earth to show location if we have a primary entry with coordinates
     if (closestPrimaryWithLocation?.location) {
-      this.earthGlobe.rotateTo(
-        closestPrimaryWithLocation.location.lon,
-        closestPrimaryWithLocation.location.lat
-      );
+      if (this.spaceScene) {
+        this.spaceScene.rotateTo(
+          closestPrimaryWithLocation.location.lon,
+          closestPrimaryWithLocation.location.lat
+        );
+      }
 
       // Calculate marker opacity based on distance (fade out over 2x primary range)
       const fadeRange = primaryRange * 2.0;
       const opacity = fadeRange > 0 ? 1.0 - Math.min(closestDistance / fadeRange, 1.0) : 0;
-      this.earthGlobe.setMarkerOpacity(opacity);
+      if (this.spaceScene) {
+        this.spaceScene.setMarkerOpacity(opacity);
+      }
     } else {
       // No location in view, hide marker
-      this.earthGlobe.setMarkerOpacity(0);
+      if (this.spaceScene) {
+        this.spaceScene.setMarkerOpacity(0);
+      }
     }
 
     // Already in chronological order, just limit total count
@@ -152,7 +158,7 @@ export class App implements AfterViewInit, OnDestroy {
   // ── View refs ─────────────────────────────────────────────────────────────────
   @ViewChild('starHost', { static: true }) starHost!: ElementRef<HTMLDivElement>;
   @ViewChild('starCanvas', { static: true }) starCanvas!: ElementRef<HTMLCanvasElement>;
-  @ViewChild('earthCanvas', { static: false }) earthCanvas!: ElementRef<HTMLCanvasElement>;
+  @ViewChild(SpaceSceneComponent, { static: false }) spaceScene!: SpaceSceneComponent;
   @ViewChild('centerline', { static: true }) centerline!: ElementRef<HTMLCanvasElement>;
   @ViewChild('timeline', { static: true }) timeline!: ElementRef<HTMLCanvasElement>;
   @ViewChild(ZoomControlComponent) zoomUi?: ZoomControlComponent;
@@ -301,32 +307,10 @@ export class App implements AfterViewInit, OnDestroy {
     this.starRender.init(this.starCanvas.nativeElement, 512);
     this.starRender.setDevicePixelRatio(this.DPR);
 
-    // Initialize Earth globe with responsive size (80vmin - 80% of smaller dimension)
-    if (this.earthCanvas && this.earthCanvas.nativeElement) {
-      const size = Math.min(window.innerWidth, window.innerHeight) * 0.8;
-      this.earthGlobe.init(this.earthCanvas.nativeElement, size, size);
-
-      // Set initial CSS size to match
-      const canvas = this.earthCanvas.nativeElement;
-      canvas.style.width = size + 'px';
-      canvas.style.height = size + 'px';
-
-      // Watch for canvas size changes with ResizeObserver
-      this.earthResizeObserver = new ResizeObserver(() => {
-        // Debounce the resize to wait for CSS transition to complete
-        if (this.earthResizeTimer) clearTimeout(this.earthResizeTimer);
-
-        this.earthResizeTimer = setTimeout(() => {
-          const w = this.earthCanvas.nativeElement.offsetWidth;
-          const h = this.earthCanvas.nativeElement.offsetHeight;
-          if (w > 0 && h > 0) {
-            this.earthGlobe.resize(w, h);
-          }
-        }, 220); // Wait slightly longer than CSS transition (200ms)
-      });
-      this.earthResizeObserver.observe(this.earthCanvas.nativeElement);
-    } else {
-      console.error('Earth canvas not found!');
+    // Space scene component handles its own initialization
+    // Set Earth rotation speed after component is ready
+    if (this.spaceScene) {
+      this.spaceScene.setEarthRotationsPerSecond(1 / 3600);
     }
 
     this.sizeAll();
@@ -374,7 +358,7 @@ export class App implements AfterViewInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
-    this.earthGlobe.dispose();
+    // Space scene component handles its own cleanup
     if (this.earthResizeObserver) {
       this.earthResizeObserver.disconnect();
       this.earthResizeObserver = null;
@@ -456,15 +440,7 @@ export class App implements AfterViewInit, OnDestroy {
         this._ZOOM_ANIM.active = false;
       }
 
-      // Resize Earth globe and update canvas CSS size
-      if (this.earthCanvas && this.earthCanvas.nativeElement) {
-        const size = Math.min(window.innerWidth, window.innerHeight) * 0.8;
-
-        // Update CSS dimensions so ResizeObserver can detect the change
-        const canvas = this.earthCanvas.nativeElement;
-        canvas.style.width = size + 'px';
-        canvas.style.height = size + 'px';
-      }
+      // Space scene component handles its own resize via ResizeObserver
 
       this.applySize(this.viewportW(), this.viewportH());
       this.reanchorGridForCenter(keepYear);
@@ -700,13 +676,10 @@ export class App implements AfterViewInit, OnDestroy {
   }
 
   private getEntries() {
-    const out: {
-      label: string;
-      when: string;
-      yf: number;
+    const out: (InfoBoxEntry & {
       yearOnly: boolean;
       location?: { lat: number; lon: number; name?: string };
-    }[] = [];
+    })[] = [];
     for (const key of Object.keys(this.TIMELINE_POINTS)) {
       const point = this.TIMELINE_POINTS[key];
       const { yf, yearOnly } = this.yearParseWithFlag(key);
@@ -717,6 +690,8 @@ export class App implements AfterViewInit, OnDestroy {
           yf,
           yearOnly,
           location: point.location,
+          sources: point.sources,
+          isPrimary: false, // will be set later in updateInfoBox
         });
       }
     }
@@ -1106,20 +1081,20 @@ export class App implements AfterViewInit, OnDestroy {
   }
 
   private ensureScrollRoomFromBounds() {
-    const demo = document.querySelector('.demo') as HTMLElement | null;
-    if (!demo) return;
+    const scrollbounds = document.querySelector('.scrollbounds') as HTMLElement | null;
+    if (!scrollbounds) return;
     const vv = (window as any).visualViewport;
     const vh = vv?.height || window.innerHeight || this.H / this.DPR;
 
     if (this.useVirtualWindow) {
       const vwinPx = Math.max(this.VWIN_MULT * vh, vh);
-      demo.style.minHeight = `${vwinPx}px`;
+      scrollbounds.style.minHeight = `${vwinPx}px`;
       this.SCROLL_MIN = 0;
       this.SCROLL_MAX = Math.max(0, vwinPx - vh);
       this.SCROLL_SHIFT = 0;
     } else {
       const needed = Math.ceil((this.SCROLL_MAX ?? 0) - (this.SCROLL_MIN ?? 0) + vh);
-      demo.style.minHeight = Math.max(needed, vh) + 'px';
+      scrollbounds.style.minHeight = Math.max(needed, vh) + 'px';
     }
   }
 

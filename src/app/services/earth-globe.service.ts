@@ -9,6 +9,14 @@ export class EarthGlobeService {
   private camera!: THREE.PerspectiveCamera;
   private renderer!: THREE.WebGLRenderer;
   private earthGroup!: THREE.Group;
+  // Star background sphere (sky)
+  private starSphere: THREE.Mesh | null = null;
+  private starTexture: THREE.Texture | null = null;
+  private readonly STAR_BG_FOLLOW = 0.18; // subtle parallax follow factor (0..1)
+  private starfieldRotation = 0; // accumulated starfield rotation (simulates annual orbit)
+  private earthRotationCount = 0; // track Earth rotations for annual starfield cycle
+  private lastEarthRotationY = 0; // previous Earth Y rotation to detect full rotations
+  private userData: { [key: string]: any } = {}; // debug data
   private sunLight!: THREE.DirectionalLight;
   private earthGeometry!: THREE.SphereGeometry;
   private baseMaterial!: THREE.MeshPhongMaterial;
@@ -24,6 +32,9 @@ export class EarthGlobeService {
   private atmosphereMesh!: THREE.Mesh;
   private atmosphereMaterial!: THREE.ShaderMaterial;
   private innerAtmosphereMaterial!: THREE.ShaderMaterial;
+  // Time-based rotation control
+  private earthRotationsPerSecond = 1 / 60; // one rotation every 60 seconds (default)
+  private lastTimeMs: number | null = null;
 
   /**
    * Toggle a debug mode that makes the topography much easier to see by:
@@ -98,6 +109,15 @@ export class EarthGlobeService {
     // Camera - wider FOV and further back to show full sphere
     this.camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 1000);
     this.camera.position.z = 3.0; // Moved back to show full Earth
+    // Offset camera to center Earth between left edge of screen and right edge
+    // Canvas is 60vw wide starting at 40vw from left edge of screen
+    // Canvas center in viewport: 40vw + 30vw = 70vw
+    // Screen center: 50vw
+    // Need to shift Earth left by 20vw in viewport terms
+    // In canvas terms: 20vw / 60vw = 1/3 of canvas width
+    // Camera X offset (negative = shift view left): aspect ratio * tan(fov/2) * proportion
+    // For FOV 50°, aspect ~1.67, at z=3.0: multiply by ~0.4
+    this.camera.position.x = 1.0; // Shift camera right to move Earth left in view
 
     // Renderer
     this.renderer = new THREE.WebGLRenderer({
@@ -121,6 +141,42 @@ export class EarthGlobeService {
     this.sunLight = new THREE.DirectionalLight(0xffffff, 2.9); // intensified sun for brighter day side
     this.sunLight.position.set(5, 3, 5);
     this.scene.add(this.sunLight);
+
+    // Star background sphere (wrapped around scene)
+    try {
+      const starLoader = new THREE.TextureLoader();
+      starLoader.load(
+        'assets/starmap_2020_4k.jpg',
+        (starTex) => {
+          if ('colorSpace' in starTex) {
+            (starTex as any).colorSpace = THREE.SRGBColorSpace;
+          }
+          // RepeatWrapping allows the texture to wrap seamlessly around the sphere
+          // This is necessary for continuous 360° rotation
+          starTex.wrapS = THREE.RepeatWrapping;
+          starTex.wrapT = THREE.ClampToEdgeWrapping; // Clamp vertically to avoid pole distortion
+          starTex.needsUpdate = true;
+          this.starTexture = starTex;
+
+          const starGeo = new THREE.SphereGeometry(50, 64, 64);
+          const starMat = new THREE.MeshBasicMaterial({
+            map: starTex,
+            side: THREE.BackSide,
+            depthWrite: false,
+          });
+          this.starSphere = new THREE.Mesh(starGeo, starMat);
+          this.starSphere.renderOrder = -10; // ensure drawn behind everything
+          this.starSphere.visible = true; // enable 3D star background
+          this.scene.add(this.starSphere);
+        },
+        undefined,
+        (err) => {
+          console.warn('Star map texture not found; continuing without background', err);
+        }
+      );
+    } catch (e) {
+      console.warn('Failed to initialize star background', e);
+    }
 
     // Earth sphere
     const geometry = new THREE.SphereGeometry(1, 64, 64);
@@ -637,6 +693,13 @@ export class EarthGlobeService {
    */
   private animate = (): void => {
     this.animationFrameId = requestAnimationFrame(this.animate);
+    const now = performance.now();
+    const dtSec = this.lastTimeMs == null ? 0 : (now - this.lastTimeMs) / 1000;
+    this.lastTimeMs = now;
+    // Angular/zone timers can stall; guard against giant dt that would cause jumps
+    const clampedDt = Math.min(dtSec, 0.1); // cap at 100ms/frame for stability
+    const omega = Math.PI * 2 * this.earthRotationsPerSecond; // rad/sec
+    const rotationDelta = omega * clampedDt; // rad this frame
 
     // Update atmosphere sun direction uniform each frame
     if (this.atmosphereMaterial && this.sunLight) {
@@ -697,18 +760,72 @@ export class EarthGlobeService {
       if (this.locationMarker && this.currentMarkerPosition) {
         this.updateMarkerPosition();
       }
+
+      // Subtle star background follow to preserve depth without distracting motion
+      if (this.starSphere) {
+        // Annual rotation component (independent of Earth's current orientation)
+        // Plus subtle parallax based on current Earth tilt
+        this.starSphere.rotation.x = this.earthGroup.rotation.x * this.STAR_BG_FOLLOW;
+        this.starSphere.rotation.y = this.starfieldRotation;
+      }
+
+      // Advance starfield smoothly even during rotate-to animations (time-based)
+      this.starfieldRotation += rotationDelta / 365;
+      // Keep the angle bounded to avoid numeric drift while remaining visually seamless
+      const twoPi = Math.PI * 2;
+      if (this.starfieldRotation > twoPi) this.starfieldRotation -= twoPi;
     } else {
       // Slow idle rotation when not animating to a target (halved speed)
-      this.earthGroup.rotation.y += 0.0205;
-      // Keep angle bounded to avoid very large values over time
-      this.earthGroup.rotation.y = Math.atan2(
+      this.earthGroup.rotation.y += rotationDelta;
+
+      // Normalize Earth rotation FIRST to get consistent values
+      const normalizedY = Math.atan2(
         Math.sin(this.earthGroup.rotation.y),
         Math.cos(this.earthGroup.rotation.y)
       );
 
+      // Track Earth rotations by detecting when we cross from negative to positive (zero crossing)
+      // This gives us exactly ONE increment per full rotation
+      // Only trigger when going from last < 0 to current >= 0 (not the other way around)
+      if (this.lastEarthRotationY < 0 && normalizedY >= 0) {
+        this.earthRotationCount++;
+        console.log('✓ Earth rotation complete! Count:', this.earthRotationCount);
+      }
+
+      // Debug logging every 100 frames
+      if (!this.userData) this.userData = {};
+      this.userData['frameCount'] = (this.userData['frameCount'] || 0) + 1;
+      if (this.userData['frameCount'] % 100 === 0) {
+        console.log('Rotation status:', {
+          frame: this.userData['frameCount'],
+          currentY: normalizedY.toFixed(4),
+          lastY: this.lastEarthRotationY.toFixed(4),
+          earthRotationCount: this.earthRotationCount,
+          starfieldRotation: this.starfieldRotation.toFixed(4),
+          starfieldDegrees: ((this.starfieldRotation * 180) / Math.PI).toFixed(2),
+          progress: ((this.earthRotationCount / 365) * 100).toFixed(1) + '%',
+        });
+      }
+
+      this.lastEarthRotationY = normalizedY;
+      this.earthGroup.rotation.y = normalizedY;
+
+      // Annual starfield rotation: 1 full rotation per 365 Earth rotations
+      // Accumulate smoothly per-frame for continuous motion
+      this.starfieldRotation += rotationDelta / 365;
+      // Keep the angle bounded to avoid numeric drift while remaining visually seamless
+      const twoPi = Math.PI * 2;
+      if (this.starfieldRotation > twoPi) this.starfieldRotation -= twoPi;
+
       // Update marker position during idle rotation too
       if (this.locationMarker && this.currentMarkerPosition) {
         this.updateMarkerPosition();
+      }
+
+      if (this.starSphere) {
+        // Annual rotation only (no parallax mixing on Y to avoid jumps)
+        this.starSphere.rotation.x = this.earthGroup.rotation.x * this.STAR_BG_FOLLOW;
+        this.starSphere.rotation.y = this.starfieldRotation;
       }
     }
 
@@ -722,6 +839,13 @@ export class EarthGlobeService {
     }
     this.renderer.render(this.scene, this.camera);
   };
+
+  /** Set Earth rotation speed in rotations per second (e.g., 10 for testing) */
+  public setEarthRotationsPerSecond(rps: number): void {
+    // clamp to sensible range to avoid numerical instability
+    const clamped = THREE.MathUtils.clamp(rps, 0, 60); // up to 60 rps for extreme tests
+    this.earthRotationsPerSecond = clamped;
+  }
 
   /**
    * Adjust the perceived blur radius of the sun glint on oceans.
@@ -990,5 +1114,19 @@ export class EarthGlobeService {
     if (this.cloudsMaterial) this.cloudsMaterial.dispose();
     if (this.cloudShadowMaterial) this.cloudShadowMaterial.dispose();
     if (this.atmosphereMaterial) this.atmosphereMaterial.dispose();
+
+    // Dispose star background resources
+    if (this.starSphere) {
+      if (this.starSphere.geometry) (this.starSphere.geometry as THREE.SphereGeometry).dispose();
+      const mat = this.starSphere.material as THREE.Material | THREE.Material[];
+      if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
+      else mat.dispose();
+      this.scene.remove(this.starSphere);
+      this.starSphere = null;
+    }
+    if (this.starTexture) {
+      this.starTexture.dispose();
+      this.starTexture = null;
+    }
   }
 }
