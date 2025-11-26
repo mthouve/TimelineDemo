@@ -5,10 +5,11 @@ export interface TimelinePointLocation {
 }
 
 export interface TimelineSource {
-  type: 'youtube' | 'link';
+  type: 'youtube' | 'link' | 'bible';
   title: string;
   label: string;
   youtubeId?: string;
+  reference?: string;
   url?: string;
 }
 
@@ -19,6 +20,25 @@ export interface TimelinePoint {
 }
 
 export const TIMELINE_POINTS: Record<string, TimelinePoint> = {
+  '609 B.C.E.': {
+    description: 'Battle of Megiddo: Pharaoh Necho II of Egypt defeats King Josiah of Judah.',
+    location: { lat: 32.35, lon: 35.11, name: 'Megiddo, Judah (Israel)' },
+    sources: [
+      {
+        type: 'youtube',
+        title:
+          "The Egyptian Army at Megiddo: A New Archaeological Window Into King Josiah's Last Stand",
+        label: 'Watch video',
+        youtubeId: 'd6wPX02JR0c',
+      },
+      {
+        type: 'link',
+        title: 'Wikipedia: Battle of Megiddo (609 BC)',
+        label: 'Wikipedia',
+        url: 'https://en.wikipedia.org/wiki/Battle_of_Megiddo_(609_BC)',
+      },
+    ],
+  },
   '600 B.C.E.': {
     description: 'The oldest known map was created around this time.',
     location: { lat: 33.0332, lon: 44.1508, name: 'Sippar, Baghdad vilayet (Iraq)' },
@@ -44,14 +64,29 @@ export const TIMELINE_POINTS: Record<string, TimelinePoint> = {
     ],
   },
   'c. 7 B.C.E.': {
-    description:
-      'Announcement of Birth of John at the Temple (Luke 1:5-25). Foretold in Malachi 4:5-6.',
+    description: 'Announcement of Birth of John at the Temple (Luke 1:5-25).',
     location: { lat: 31.464, lon: 35.1408, name: 'Jerusalem' },
+    sources: [
+      {
+        type: 'bible',
+        title: 'Luke 1:5-25',
+        label: 'Bible',
+        reference: 'Luke 1:5-25',
+      },
+    ],
   },
   'c. 6 B.C.E.': {
     description:
       'Announcement of Birth of Jesus to Mary while in Nazareth (Luke 1:26-38). Foretold in Isaiah 7:14.',
     location: { lat: 32.4207, lon: 35.1812, name: 'Nazareth' },
+    sources: [
+      {
+        type: 'bible',
+        title: 'Luke 1:26-38',
+        label: 'Bible',
+        reference: 'Luke 1:26-38',
+      },
+    ],
   },
   'c. 27 C.E.': {
     description:
@@ -61,7 +96,7 @@ export const TIMELINE_POINTS: Record<string, TimelinePoint> = {
       {
         type: 'youtube',
         title: 'Did Archaeologists Just Find Evidence of a Miracle by Jesus?!',
-        label: 'Watch video',
+        label: 'YouTube',
         youtubeId: 'lX4GJ_zmwTE',
       },
       {
@@ -69,6 +104,12 @@ export const TIMELINE_POINTS: Record<string, TimelinePoint> = {
         title: 'Pool of Bethesda',
         label: 'Wikipedia',
         url: 'https://en.wikipedia.org/wiki/Pool_of_Bethesda',
+      },
+      {
+        type: 'bible',
+        title: 'Luke 5:17-26',
+        label: 'Bible',
+        reference: 'Luke 5:17-26',
       },
     ],
   },
@@ -78,7 +119,7 @@ export const TIMELINE_POINTS: Record<string, TimelinePoint> = {
     sources: [
       {
         type: 'link',
-        title: 'Wikipedia: 1 BC',
+        title: '1 BC',
         label: 'Wikipedia',
         url: 'https://en.wikipedia.org/wiki/1_BC',
       },
@@ -87,25 +128,9 @@ export const TIMELINE_POINTS: Record<string, TimelinePoint> = {
   '1 C.E.': {
     description: 'This was the beginning of the Common Era.',
     location: { lat: 31.7683, lon: 35.2137, name: 'Jerusalem' },
-    sources: [
-      {
-        type: 'link',
-        title: 'Wikipedia: AD 1',
-        label: 'Wikipedia',
-        url: 'https://en.wikipedia.org/wiki/AD_1',
-      },
-    ],
   },
   '10 C.E.': {
     description: 'Did you know? Something interesting happened in 10 C.E.',
-    sources: [
-      {
-        type: 'link',
-        title: 'Wikipedia: AD 10',
-        label: 'Wikipedia',
-        url: 'https://en.wikipedia.org/wiki/AD_10',
-      },
-    ],
   },
   '100 C.E.': {
     description: 'Wait until you hear about what happened in 100 C.E.!',
