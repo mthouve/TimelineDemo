@@ -98,12 +98,85 @@ export class BibleViewerComponent implements OnInit {
     this.searchResults.update(() => []);
   }
 
+  // Highlight state
+  highlightedVerses: { [key: number]: boolean } = {};
+  highlightAnimTimeout?: any;
+  highlightAnimFrame?: number;
+  highlightOpacity = 0;
+  highlightTargetOpacity = 0;
+  highlightEaseDuration = 1600; // ms for ease in/out
+  highlightColor = 'rgba(255, 170, 80, 0.25)'; // dim orange
+
   goToReference(ref: BibleReference) {
     const book = this.books().find((b: BibleBook) => b.name === ref.book);
     if (!book) return;
     this.selectBook(book);
     this.selectChapter(ref.chapter);
-    // Optionally scroll to verse
+
+    // Wait for verses to render, then scroll/highlight
+    setTimeout(() => {
+      this.scrollAndHighlight(ref);
+    }, 0);
+  }
+
+  scrollAndHighlight(ref: BibleReference) {
+    // Clear previous highlight
+    this.highlightedVerses = {};
+    this.highlightOpacity = 0;
+    this.highlightTargetOpacity = 1;
+    if (this.highlightAnimTimeout) clearTimeout(this.highlightAnimTimeout);
+    if (this.highlightAnimFrame) cancelAnimationFrame(this.highlightAnimFrame);
+
+    // Determine range
+    const start = ref.verse || 1;
+    const end = ref.endVerse || start;
+    for (let v = start; v <= end; v++) this.highlightedVerses[v] = true;
+
+    // Find first verse element
+    const container = this.bibleContentEl?.nativeElement;
+    if (!container) return;
+    const verseEls = Array.from(container.querySelectorAll('.bible-verse')) as HTMLElement[];
+    const firstIdx = this.verses().findIndex((v) => v.verse === start);
+    if (firstIdx < 0) return;
+    const verseEl = verseEls[firstIdx];
+    if (!verseEl) return;
+
+    // Scroll smoothly to verse
+    verseEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    // Animate highlight in
+    const ease = (t: number) => (t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t);
+    const startTime = performance.now();
+    const animateIn = (now: number) => {
+      const t = Math.min(1, (now - startTime) / this.highlightEaseDuration);
+      this.highlightOpacity = ease(t) * this.highlightTargetOpacity;
+      if (t < 1) {
+        this.highlightAnimFrame = requestAnimationFrame(animateIn);
+      } else {
+        this.highlightOpacity = this.highlightTargetOpacity;
+        // Hold highlight for 4s, then fade out
+        this.highlightAnimTimeout = setTimeout(() => this.fadeOutHighlight(), 4000);
+      }
+    };
+    this.highlightAnimFrame = requestAnimationFrame(animateIn);
+  }
+
+  fadeOutHighlight() {
+    this.highlightTargetOpacity = 0;
+    const ease = (t: number) => (t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t);
+    const startTime = performance.now();
+    const startOpacity = this.highlightOpacity;
+    const animateOut = (now: number) => {
+      const t = Math.min(1, (now - startTime) / this.highlightEaseDuration);
+      this.highlightOpacity = startOpacity * (1 - ease(t));
+      if (t < 1) {
+        this.highlightAnimFrame = requestAnimationFrame(animateOut);
+      } else {
+        this.highlightOpacity = 0;
+        this.highlightedVerses = {};
+      }
+    };
+    this.highlightAnimFrame = requestAnimationFrame(animateOut);
   }
 
   formatReference(ref: BibleReference) {

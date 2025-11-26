@@ -27,11 +27,13 @@
       *ngFor="let verse of verses()"
       class="bible-verse"
       [class.with-originals]="showOriginals()"
+      [class.highlighted]="highlightedVerses[verse.verse]"
+      [style.--highlight-opacity]="highlightedVerses[verse.verse] ? highlightOpacity : null"
     >
       <div class="verse-line">
-        <span class="ref"
-          >{{ selectedBook()?.abbreviation }} {{ selectedChapter() }}:{{ verse.verse }}</span
-        >
+        <span class="ref">
+          {{ selectedBook()?.abbreviation }} {{ selectedChapter() }}:{{ verse.verse }}
+        </span>
         <span class="text" [innerHTML]="formatVerseHtml(verse.text)"></span>
       </div>
       <div class="orig-text" *ngIf="showOriginals()">

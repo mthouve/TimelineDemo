@@ -76,6 +76,12 @@
   line-height: 1.6;
   display: flex;
   flex-direction: column;
+  position: relative;
+  transition: background 0.5s;
+}
+.bible-verse.highlighted {
+  background: rgba(255, 170, 80, 0.35);
+  transition: background 3s;
 }
 .bible-verse.with-originals {
   border-left: 3px solid rgba(255, 150, 60, 0.95);
