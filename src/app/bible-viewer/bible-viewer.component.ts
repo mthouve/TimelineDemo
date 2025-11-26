@@ -1,3 +1,4 @@
+// ...existing code...
 import {
   Component,
   Input,
@@ -29,6 +30,12 @@ import {
   imports: [CommonModule, FormsModule],
 })
 export class BibleViewerComponent implements OnInit, AfterViewInit {
+  // Animation state for page slide
+  pageSlideDirection: 'left' | 'right' | null = null;
+  lastBookIndex: number | null = null;
+  lastChapter: number | null = null;
+  isFirstLoad: boolean = true;
+// ...existing code...
   /**
    * Optionally set this input to highlight a passage on load (e.g. { book: 'Luke', chapter: 5, verse: 17, endVerse: 26 })
    */
@@ -75,10 +82,21 @@ export class BibleViewerComponent implements OnInit, AfterViewInit {
   }
 
   selectBook(book: BibleBook | null) {
+    const booksArr = this.books();
+    const newBookIdx = book ? booksArr.findIndex(b => b.name === book.name) : -1;
+    let direction: 'left' | 'right' | null = null;
+    if (this.lastBookIndex !== null && newBookIdx !== -1) {
+      direction = newBookIdx > this.lastBookIndex ? 'left' : 'right';
+    }
+    this.pageSlideDirection = direction;
     this.selectedBook.update(() => book);
     this.selectedChapter.update(() => 1);
     this.updateVerses();
     this.resetScrollToTop();
+    this.lastBookIndex = newBookIdx;
+    this.lastChapter = 1;
+    this.isFirstLoad = false;
+    setTimeout(() => (this.pageSlideDirection = null), 600);
   }
 
   onBookChange(event: Event) {
@@ -89,9 +107,18 @@ export class BibleViewerComponent implements OnInit, AfterViewInit {
   }
 
   selectChapter(chapter: number) {
+    const prevChapter = this.lastChapter;
+    let direction: 'left' | 'right' | null = null;
+    if (prevChapter !== null && chapter !== prevChapter) {
+      direction = chapter > prevChapter ? 'left' : 'right';
+    }
+    this.pageSlideDirection = direction;
     this.selectedChapter.update(() => Number(chapter));
     this.updateVerses();
     this.resetScrollToTop();
+    this.lastChapter = chapter;
+    this.isFirstLoad = false;
+    setTimeout(() => (this.pageSlideDirection = null), 600);
   }
   resetScrollToTop() {
     // Reset scroll position to top of bible content
@@ -143,28 +170,47 @@ export class BibleViewerComponent implements OnInit, AfterViewInit {
   highlightColor = 'rgba(80, 50, 0, 0.32)'; // darker, less saturated orange
 
   goToReference(ref: BibleReference) {
-    const book = this.books().find((b: BibleBook) => b.name === ref.book);
+    const booksArr = this.books();
+    const book = booksArr.find((b: BibleBook) => b.name === ref.book);
     if (!book) return;
     const currentBook = this.selectedBook();
     const currentChapter = this.selectedChapter();
+    const newBookIdx = booksArr.findIndex(b => b.name === book.name);
+    const currentBookIdx = currentBook ? booksArr.findIndex(b => b.name === currentBook.name) : -1;
     const changingBook = !currentBook || currentBook.name !== book.name;
     const changingChapter = currentChapter !== ref.chapter;
 
-    if (changingBook) {
-      this.selectBook(book);
-    }
-    if (changingBook || changingChapter) {
-      this.selectChapter(ref.chapter);
-      // Will reset scroll to top in selectBook/selectChapter
+    // Only animate if not first load
+    if (!this.isFirstLoad && (changingBook || changingChapter)) {
+      let direction: 'left' | 'right' | null = null;
+      if (changingBook && currentBookIdx !== -1 && newBookIdx !== -1) {
+        direction = newBookIdx > currentBookIdx ? 'left' : 'right';
+      } else if (changingChapter && currentChapter !== null) {
+        direction = ref.chapter > currentChapter ? 'left' : 'right';
+      }
+      this.pageSlideDirection = direction;
+      setTimeout(() => (this.pageSlideDirection = null), 600);
     }
 
-    // Wait for verses to render if changing book/chapter, otherwise scroll immediately
-    setTimeout(
-      () => {
-        this.scrollAndHighlight(ref);
-      },
-      changingBook || changingChapter ? 0 : 0
-    );
+    if (changingBook) {
+      this.selectedBook.update(() => book);
+      this.selectedChapter.update(() => 1);
+      this.updateVerses();
+      this.resetScrollToTop();
+      this.lastBookIndex = newBookIdx;
+      this.lastChapter = 1;
+    }
+    if (changingBook || changingChapter) {
+      this.selectedChapter.update(() => Number(ref.chapter));
+      this.updateVerses();
+      this.resetScrollToTop();
+      this.lastChapter = ref.chapter;
+    }
+    this.isFirstLoad = false;
+
+    setTimeout(() => {
+      this.scrollAndHighlight(ref);
+    }, 0);
   }
 
   scrollAndHighlight(ref: BibleReference) {

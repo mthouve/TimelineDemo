@@ -1,3 +1,31 @@
+.bible-content-inner {
+  transition: transform 0.6s cubic-bezier(0.7, 0, 0.3, 1);
+  will-change: transform;
+}
+.bible-content-inner.slide-left {
+  transform: translateX(-100vw);
+  animation: slideInLeft 0.6s cubic-bezier(0.7, 0, 0.3, 1);
+}
+.bible-content-inner.slide-right {
+  transform: translateX(100vw);
+  animation: slideInRight 0.6s cubic-bezier(0.7, 0, 0.3, 1);
+}
+@keyframes slideInLeft {
+  from {
+    transform: translateX(100vw);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+@keyframes slideInRight {
+  from {
+    transform: translateX(-100vw);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
 .bible-viewer {
   display: flex;
   flex-direction: column;

@@ -24,24 +24,32 @@
     (wheel)="onWheel($event, bibleContent)"
   >
     <div
-      *ngFor="let verse of verses()"
-      class="bible-verse"
-      [class.with-originals]="showOriginals()"
-      [class.highlighted]="highlightedVerses[verse.verse]"
-      [style.--highlight-opacity]="highlightedVerses[verse.verse] ? highlightOpacity : null"
+      class="bible-content-inner"
+      [ngClass]="{
+        'slide-left': pageSlideDirection === 'left',
+        'slide-right': pageSlideDirection === 'right'
+      }"
     >
-      <div class="verse-line">
-        <span class="ref">
-          {{ selectedBook()?.abbreviation }} {{ selectedChapter() }}:{{ verse.verse }}
-        </span>
-        <span class="text" [innerHTML]="formatVerseHtml(verse.text)"></span>
-      </div>
-      <div class="orig-text" *ngIf="showOriginals()">
-        <div class="hebrew" *ngIf="getOriginalText(verse.book, verse.chapter, verse.verse).hebrew">
-          {{ getOriginalText(verse.book, verse.chapter, verse.verse).hebrew }}
+      <div
+        *ngFor="let verse of verses()"
+        class="bible-verse"
+        [class.with-originals]="showOriginals()"
+        [class.highlighted]="highlightedVerses[verse.verse]"
+        [style.--highlight-opacity]="highlightedVerses[verse.verse] ? highlightOpacity : null"
+      >
+        <div class="verse-line">
+          <span class="ref">
+            {{ selectedBook()?.abbreviation }} {{ selectedChapter() }}:{{ verse.verse }}
+          </span>
+          <span class="text" [innerHTML]="formatVerseHtml(verse.text)"></span>
         </div>
-        <div class="greek" *ngIf="getOriginalText(verse.book, verse.chapter, verse.verse).greek">
-          {{ getOriginalText(verse.book, verse.chapter, verse.verse).greek }}
+        <div class="orig-text" *ngIf="showOriginals()">
+          <div class="hebrew" *ngIf="getOriginalText(verse.book, verse.chapter, verse.verse).hebrew">
+            {{ getOriginalText(verse.book, verse.chapter, verse.verse).hebrew }}
+          </div>
+          <div class="greek" *ngIf="getOriginalText(verse.book, verse.chapter, verse.verse).greek">
+            {{ getOriginalText(verse.book, verse.chapter, verse.verse).greek }}
+          </div>
         </div>
       </div>
     </div>
