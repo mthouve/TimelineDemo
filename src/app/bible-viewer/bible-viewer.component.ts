@@ -78,6 +78,7 @@ export class BibleViewerComponent implements OnInit, AfterViewInit {
     this.selectedBook.update(() => book);
     this.selectedChapter.update(() => 1);
     this.updateVerses();
+    this.resetScrollToTop();
   }
 
   onBookChange(event: Event) {
@@ -90,6 +91,15 @@ export class BibleViewerComponent implements OnInit, AfterViewInit {
   selectChapter(chapter: number) {
     this.selectedChapter.update(() => Number(chapter));
     this.updateVerses();
+    this.resetScrollToTop();
+  }
+  resetScrollToTop() {
+    // Reset scroll position to top of bible content
+    setTimeout(() => {
+      if (this.bibleContentEl?.nativeElement) {
+        this.bibleContentEl.nativeElement.scrollTop = 0;
+      }
+    }, 0);
   }
 
   onChapterChange(event: Event) {
@@ -138,7 +148,7 @@ export class BibleViewerComponent implements OnInit, AfterViewInit {
     this.selectBook(book);
     this.selectChapter(ref.chapter);
 
-    // Wait for verses to render, then scroll/highlight
+    // Start highlight immediately (not after scroll)
     setTimeout(() => {
       this.scrollAndHighlight(ref);
     }, 0);

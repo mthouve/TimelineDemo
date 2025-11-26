@@ -81,7 +81,7 @@
 }
 .bible-verse.highlighted {
   background: rgba(80, 50, 0, var(--highlight-opacity, 0.32));
-  transition: background 1.2s cubic-bezier(0.4, 0.0, 0.2, 1);
+  transition: background 1.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .bible-verse.with-originals {
   border-left: 3px solid rgba(255, 150, 60, 0.95);
