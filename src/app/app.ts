@@ -81,6 +81,20 @@ export class App implements AfterViewInit, OnDestroy {
   // ── Info box state ──────────────────────────────────────────────────────────
   infoEntries: InfoBoxEntry[] = [];
   infoBoxHidden = true;
+  @ViewChild(BibleViewerComponent) bibleViewer?: BibleViewerComponent;
+  // Called when a Bible link is clicked in the info box
+  onBibleLink(reference: string) {
+    if (!reference || !this.bibleViewer) return;
+    // Parse reference string (e.g., "Genesis 1:1" or "John 3:16-17")
+    const match = reference.match(/^(.*?)\s+(\d+)(?::(\d+)(?:-(\d+))?)?$/);
+    if (!match) return;
+    const book = match[1];
+    const chapter = Number(match[2]);
+    const verse = match[3] ? Number(match[3]) : undefined;
+    // Use BibleViewerComponent's goToReference
+    this.bibleViewer.goToReference({ book, chapter, verse });
+    // Optionally, trigger highlight/scroll logic here (to be implemented in BibleViewerComponent)
+  }
 
   private updateInfoBox() {
     const entries = this.getEntries();

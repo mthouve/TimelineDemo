@@ -36,6 +36,10 @@
     </app-settings-control>
 
     <!-- Timeline info box -->
-    <app-info-box [entries]="infoEntries" [hidden]="infoBoxHidden" />
+    <app-info-box
+      [entries]="infoEntries"
+      [hidden]="infoBoxHidden"
+      (openBiblePassage)="onBibleLink($event)"
+    />
   </div>
 </div>

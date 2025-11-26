@@ -1,4 +1,4 @@
-import { Component, Input } from '@angular/core';
+import { Component, Input, Output, EventEmitter } from '@angular/core';
 import { YoutubeEmbedComponent } from '../components/youtube-embed/youtube-embed.component';
 import { CommonModule } from '@angular/common';
 
@@ -30,48 +30,39 @@ export interface InfoBoxEntry {
             <ng-container *ngIf="e.sources && e.sources.length">
               <div class="sources-list">
                 <ng-container *ngFor="let src of e.sources">
+                  <!-- Bible link -->
                   <button
-                    *ngIf="src.type === 'youtube'"
-                    class="yt-link icon-link"
-                    [title]="src.title"
-                    (click)="
-                      showYoutube =
-                        showYoutube === (src.youtubeId || '') ? null : src.youtubeId || ''
-                    "
+                    *ngIf="src.type === 'bible' && src.reference"
+                    class="bible-link icon-link"
+                    [title]="src.title || src.label"
+                    (click)="openBiblePassage.emit(src.reference)"
                     type="button"
                   >
-                    <span class="icon youtube-icon" aria-label="YouTube">▶</span>
-                    <span class="icon-title">{{ src.title }}</span>
+                    <span class="icon bible-icon" aria-label="Bible">📖</span>
+                    <span class="icon-title">{{ src.label }}</span>
                   </button>
+                  <!-- YouTube link -->
                   <a
-                    *ngIf="
-                      src.type === 'link' &&
-                      src.url &&
-                      src.title.toLowerCase().includes('wikipedia')
-                    "
-                    class="ext-link icon-link"
-                    [href]="src.url"
-                    [title]="src.title"
-                    target="_blank"
-                    rel="noopener noreferrer"
+                    *ngIf="src.type === 'youtube' && src.youtubeId"
+                    class="icon-link youtube-link"
+                    [title]="src.title || src.label"
+                    (click)="showYoutube = showYoutube === src.youtubeId ? null : src.youtubeId"
+                    href="javascript:void(0);"
                   >
-                    <span class="icon wikipedia-icon" aria-label="Wikipedia">🛈</span>
-                    <span class="icon-title">{{ src.title }}</span>
+                    <span class="icon youtube-icon" aria-label="YouTube">▶️</span>
+                    <span class="icon-title">{{ src.label }}</span>
                   </a>
+                  <!-- Wikipedia or Web link (type: 'link') -->
                   <a
-                    *ngIf="
-                      src.type === 'link' &&
-                      src.url &&
-                      !src.title.toLowerCase().includes('wikipedia')
-                    "
-                    class="ext-link icon-link"
+                    *ngIf="src.type === 'link' && src.url"
+                    class="icon-link web-link"
                     [href]="src.url"
-                    [title]="src.title"
+                    [title]="src.title || src.label"
                     target="_blank"
                     rel="noopener noreferrer"
                   >
                     <span class="icon web-icon" aria-label="Web">🌐</span>
-                    <span class="icon-title">{{ src.title }}</span>
+                    <span class="icon-title">{{ src.label }}</span>
                   </a>
                   <div
                     class="yt-embed"
@@ -85,10 +76,11 @@ export interface InfoBoxEntry {
             </ng-container>
           </div>
         </ng-container>
-        <ng-template #emptyState></ng-template>
+        <ng-template #emptyState><div class="empty">No entries</div></ng-template>
       </div>
     </div>
   `,
+
   styles: [
     `
       .icon-link {
@@ -198,10 +190,10 @@ export interface InfoBoxEntry {
 export class InfoBoxComponent {
   @Input() entries: InfoBoxEntry[] = [];
   @Input() hidden = true;
+  @Output() openBiblePassage = new EventEmitter<string>();
   showYoutube: string | null = null;
 
   trackByYoutubeOrLabel(index: number, entry: InfoBoxEntry): string {
-    // Use label, or if sources exist, use label plus all source labels
     if (entry.sources && entry.sources.length) {
       return entry.label + '-' + entry.sources.map((s) => s.label).join('-');
     }
