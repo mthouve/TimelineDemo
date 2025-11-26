@@ -159,9 +159,12 @@ export class BibleViewerComponent implements OnInit, AfterViewInit {
     }
 
     // Wait for verses to render if changing book/chapter, otherwise scroll immediately
-    setTimeout(() => {
-      this.scrollAndHighlight(ref);
-    }, (changingBook || changingChapter) ? 0 : 0);
+    setTimeout(
+      () => {
+        this.scrollAndHighlight(ref);
+      },
+      changingBook || changingChapter ? 0 : 0
+    );
   }
 
   scrollAndHighlight(ref: BibleReference) {
@@ -205,9 +208,7 @@ export class BibleViewerComponent implements OnInit, AfterViewInit {
     const startScroll = scrollTop;
     const duration = this.scrollDuration;
     // Smoother ease: cubic ease in/out (slower start and end)
-    const ease = (t: number) => t < 0.5
-      ? 4 * t * t * t
-      : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
     const scrollStartTime = performance.now();
     const animateScroll = (now: number) => {
       const t = Math.min(1, (now - scrollStartTime) / duration);
