@@ -11,6 +11,7 @@ import { TimelineDateService, ZoomSpec } from './services/timeline-date.service'
 import { TimelineEntryService } from './services/timeline-entry.service';
 import { TimelineHudService } from './services/timeline-hud.service';
 import { TimelineRendererService } from './services/timeline-renderer.service';
+import { TimelineZoomService, ZoomAnimationState } from './services/timeline-zoom.service';
 import { SpaceSceneComponent } from './components/space-scene/space-scene.component';
 import { ZoomControlComponent } from './zoom-control/zoom-control.component';
 import { SettingsControlComponent } from './settings-control/settings-control.component';
@@ -18,32 +19,6 @@ import { InfoBoxComponent, InfoBoxEntry } from './info-box/info-box.component';
 import { BibleViewerComponent } from './bible-viewer/bible-viewer.component';
 import { CommonModule } from '@angular/common';
 import { TimelineEntry } from './models/timeline-entry.model';
-
-// Animation envelope (typed)
-type ZoomAnim = {
-  active: boolean;
-  t0: number;
-  dur: number;
-  startUnit: number;
-  endUnit: number;
-  keepYear: number | null;
-  targetIdx: number;
-
-  // HUD step pair
-  hudFromIdx?: number;
-  hudToIdx?: number;
-  hudStartUnit?: number;
-  hudEndUnit?: number;
-
-  startIdx?: number;
-  endIdx?: number;
-
-  // piecewise path
-  unitsSeq?: number[];
-  stepDist?: number[];
-  cumDist?: number[];
-  totalDist?: number;
-};
 
 @Component({
   selector: 'app-root',
@@ -65,6 +40,7 @@ export class App implements AfterViewInit, OnDestroy {
     private timelineEntryService: TimelineEntryService,
     private hudService: TimelineHudService,
     private timelineRenderer: TimelineRendererService,
+    private zoomService: TimelineZoomService,
     private r2: Renderer2,
   ) {
     // Ensure a sensible base page title for tests and initial load
@@ -270,7 +246,7 @@ export class App implements AfterViewInit, OnDestroy {
   private touchY0: number | null = null;
 
   // ── Animation envelope (typed + private backing) ──────────────────────────────
-  private _ZOOM_ANIM: ZoomAnim = {
+  private _ZOOM_ANIM: ZoomAnimationState = {
     active: false,
     t0: 0,
     dur: 2500,
@@ -279,7 +255,7 @@ export class App implements AfterViewInit, OnDestroy {
     keepYear: null,
     targetIdx: this.currentZoomIdx,
   };
-  get ZOOM_ANIM(): ZoomAnim {
+  get ZOOM_ANIM(): ZoomAnimationState {
     return this._ZOOM_ANIM;
   }
   get isZoomAnimating(): boolean {
@@ -586,31 +562,6 @@ export class App implements AfterViewInit, OnDestroy {
 
     this.GRID.spacingCSS = Math.max(12, cssH / this.GRID.targetVisible);
     this.dpr = this.DPR;
-  }
-
-  // ── Easing: accel→cruise→decel (non-recursive, area-normalized) ───────────────
-  private accelCruiseDecel(t: number, accelFrac: number = 0.18, decelFrac: number = 0.18): number {
-    t = this.clamp(t, 0, 1);
-    let a = Math.max(0, Math.min(0.45, accelFrac));
-    let d = Math.max(0, Math.min(0.45, decelFrac));
-    if (a + d > 0.95) {
-      const s = a + d;
-      a = (a / s) * 0.95;
-      d = (d / s) * 0.95;
-    }
-    const c = Math.max(0, 1 - a - d);
-    const vmax = 1 / (c + 0.5 * (a + d)); // area=1
-
-    if (t <= a) {
-      return (vmax * (t * t)) / (2 * Math.max(a, 1e-6));
-    }
-    if (t <= a + c) {
-      const f_acc = vmax * (a / 2);
-      return f_acc + vmax * (t - a);
-    }
-    const f_acc_cruise = vmax * (a / 2 + c);
-    const s = (t - (a + c)) / Math.max(d, 1e-6); // 0..1
-    return f_acc_cruise + vmax * (d * (s - 0.5 * s * s));
   }
 
   // ── Helpers: parsing / mapping ────────────────────────────────────────────────
@@ -984,8 +935,6 @@ export class App implements AfterViewInit, OnDestroy {
 
     const startIdx = this.currentZoomIdx;
     const endIdx = idx;
-    const startUnit = this.zoomLevels[startIdx].unit;
-    const endUnit = this.zoomLevels[endIdx].unit;
     const dir = endIdx > startIdx ? 1 : -1;
 
     // 1) LOCK SCROLL during the whole animation
@@ -1002,33 +951,6 @@ export class App implements AfterViewInit, OnDestroy {
       else if (i === toIdxSeed) el.style.opacity = '0';
     }
 
-    // Build path across units
-    const unitsSeq: number[] = [];
-    for (let i = startIdx; i !== endIdx; i += dir) unitsSeq.push(this.zoomLevels[i].unit);
-    unitsSeq.push(this.zoomLevels[endIdx].unit);
-
-    const stepDist: number[] = [];
-    for (let i = 0; i < unitsSeq.length - 1; i++) {
-      const a = unitsSeq[i],
-        b = unitsSeq[i + 1];
-      const r = b / a;
-      const d = r > 0 && isFinite(r) ? Math.abs(Math.log(r)) : Math.abs(b - a);
-      stepDist.push(d);
-    }
-    const cumDist: number[] = [0];
-    for (let i = 0; i < stepDist.length; i++) cumDist.push(cumDist[i] + stepDist[i]);
-    const totalDist = cumDist[cumDist.length - 1] || 1;
-
-    // Duration proportional to steps
-    const steps = Math.max(1, Math.abs(endIdx - startIdx));
-    // Duration scales from ~4s (1 step) up to ~10s (max steps) with convex compression.
-    const allSteps = Math.max(1, this.zoomLevels.length - 1);
-    const norm = allSteps > 1 ? (steps - 1) / (allSteps - 1) : 0; // 0..1
-    const emph = norm * norm; // bias more compression for longer jumps
-    const totalDur = Math.round(
-      this.DUR_SINGLE_STEP_MS + (this.DUR_ACROSS_ALL_MS - this.DUR_SINGLE_STEP_MS) * emph,
-    );
-
     // Live caption during transition
     this._zoomStepLabel = this.zoomLevels[startIdx].name;
 
@@ -1036,82 +958,35 @@ export class App implements AfterViewInit, OnDestroy {
     const oldTitle = document.title;
     document.title = `${this._zoomStepLabel} — ${oldTitle.replace(/^(.*?)( — )?/, '')}`;
 
-    // Seed animation state
-    this._ZOOM_ANIM = {
-      active: true,
-      t0: performance && performance.now ? performance.now() : Date.now(),
-      dur: totalDur,
-      startUnit,
-      endUnit,
-      keepYear,
-      targetIdx: endIdx,
-
-      hudFromIdx: fromIdxSeed,
-      hudToIdx: toIdxSeed,
-      hudStartUnit: this.zoomLevels[fromIdxSeed]?.unit ?? startUnit,
-      hudEndUnit: this.zoomLevels[toIdxSeed]?.unit ?? endUnit,
-
+    this._ZOOM_ANIM = this.zoomService.createAnimation({
       startIdx,
       endIdx,
-
-      unitsSeq,
-      stepDist,
-      cumDist,
-      totalDist,
-    };
+      keepYear,
+      zoomLevels: this.zoomLevels,
+      durationSingleStepMs: this.DUR_SINGLE_STEP_MS,
+      durationAcrossAllMs: this.DUR_ACROSS_ALL_MS,
+      nowMs: performance && performance.now ? performance.now() : Date.now(),
+    });
 
     this.animFromIdx = fromIdxSeed;
     this.animToIdx = toIdxSeed;
 
     // First frame
-    this.TL.unitYears = startUnit;
+    this.TL.unitYears = this._ZOOM_ANIM.startUnit;
     this._zoomVisualIndex = startIdx;
     this.redraw(1, 0);
 
     requestAnimationFrame(this.zoomTick);
   }
 
-  private lerp(a: number, b: number, t: number) {
-    return a + (b - a) * t;
-  }
-
   private zoomTick = () => {
     if (!this._ZOOM_ANIM.active) return;
 
     const now = performance && performance.now ? performance.now() : Date.now();
-    const elapsed = Math.max(0, now - this._ZOOM_ANIM.t0);
-    const totalMs = this._ZOOM_ANIM.dur;
-
-    // Global progress 0..1
-    const g = this.clamp(elapsed / totalMs, 0, 1);
-
-    // Smooth zoom profile for the HUD path.
-    const ship = this.accelCruiseDecel(g, 0.36, 0.36);
-
-    // Path info
-    const unitsSeq: number[] = this._ZOOM_ANIM.unitsSeq!;
-    const stepDist: number[] = this._ZOOM_ANIM.stepDist!;
-    const cumDist: number[] = this._ZOOM_ANIM.cumDist!;
-    const totalDist: number = this._ZOOM_ANIM.totalDist || 1;
-
-    // Target distance along the piecewise-log path
-    const dTarget = ship * totalDist;
-
-    // Find current segment
-    let i = 0;
-    while (i < stepDist.length - 1 && dTarget > cumDist[i + 1]) i++;
-
-    const dSeg = stepDist[i] || 1e-6;
-    const segT = this.clamp((dTarget - cumDist[i]) / dSeg, 0, 1);
-
-    const a = unitsSeq[i];
-    const b = unitsSeq[i + 1];
-    const r = b > 0 && a > 0 ? b / a : 1;
-    const unitThisFrame =
-      r > 0 && isFinite(r) ? a * Math.exp(Math.log(r) * segT) : this.lerp(a, b, segT);
+    const frame = this.zoomService.getFrame(this._ZOOM_ANIM, now);
 
     // Apply mapping
-    this.TL.unitYears = unitThisFrame;
+    this.TL.unitYears = frame.unitYears;
 
     // Center anchoring
     const ky = this._ZOOM_ANIM.keepYear!;
@@ -1119,52 +994,30 @@ export class App implements AfterViewInit, OnDestroy {
     this.reanchorGridForCenter(ky);
 
     // Active HUD pair & fade
-    const startIdx = this._ZOOM_ANIM.startIdx!;
-    const endIdx = this._ZOOM_ANIM.endIdx!;
-    const dir = endIdx > startIdx ? 1 : -1;
-
-    const curFromIdx = startIdx + i * dir;
-    const curToIdx = curFromIdx + dir;
-
-    if (curFromIdx !== this.animFromIdx || curToIdx !== this.animToIdx) {
-      this._ZOOM_ANIM.hudFromIdx = curFromIdx;
-      this._ZOOM_ANIM.hudToIdx = curToIdx;
-      this._ZOOM_ANIM.hudStartUnit = this.zoomLevels[curFromIdx].unit;
-      this._ZOOM_ANIM.hudEndUnit = this.zoomLevels[curToIdx].unit;
-      this.animFromIdx = curFromIdx;
-      this.animToIdx = curToIdx;
+    if (frame.fromIdx !== this.animFromIdx || frame.toIdx !== this.animToIdx) {
+      this._ZOOM_ANIM.hudFromIdx = frame.fromIdx;
+      this._ZOOM_ANIM.hudToIdx = frame.toIdx;
+      this._ZOOM_ANIM.hudStartUnit = this.zoomLevels[frame.fromIdx].unit;
+      this._ZOOM_ANIM.hudEndUnit = this.zoomLevels[frame.toIdx].unit;
+      this.animFromIdx = frame.fromIdx;
+      this.animToIdx = frame.toIdx;
       this.HUDS[this.animFromIdx].el.style.opacity = '1';
       this.HUDS[this.animToIdx].el.style.opacity = '0';
     }
 
-    const fadeTo = segT;
-    const fadeFrom = 1 - fadeTo;
-
-    // Decide which level we’re effectively “at” this frame.
-    // Visual slider position (fractional)
-    const visualIndex = startIdx + dir * (i + segT);
-    this._zoomVisualIndex = visualIndex;
+    this._zoomVisualIndex = frame.visualIndex;
     // (Keep the thumb parked: no need to call setSliderVisualIndex here)
 
-    // — Caption changes exactly at tick crossings —
-    const EPS = 1e-6;
-    // When zooming in (dir=+1), show the level at/behind the progress edge:
-    // stays "from" until the edge reaches the next tick, then flips.
-    const liveIdx =
-      dir > 0
-        ? Math.min(endIdx, Math.floor(visualIndex + EPS))
-        : Math.max(endIdx, Math.ceil(visualIndex - EPS));
-
-    this._zoomStepLabel = this.zoomLevels[liveIdx].name;
+    this._zoomStepLabel = this.zoomLevels[frame.liveIdx].name;
 
     // Draw frame
-    this.redraw(fadeFrom, fadeTo);
+    this.redraw(frame.fadeFrom, frame.fadeTo);
 
     // Keep bounds aligned while mapping changes
     this.updateScrollBounds();
     this.ensureScrollRoomFromBounds();
 
-    if (elapsed < totalMs) {
+    if (!frame.done) {
       requestAnimationFrame(this.zoomTick);
       return;
     }
