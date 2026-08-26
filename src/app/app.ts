@@ -8,6 +8,7 @@ import {
   Renderer2,
 } from '@angular/core';
 import { TimelineDateService, ZoomSpec } from './services/timeline-date.service';
+import { TimelineEntryService } from './services/timeline-entry.service';
 import { TimelineHudService } from './services/timeline-hud.service';
 import { SpaceSceneComponent } from './components/space-scene/space-scene.component';
 import { ZoomControlComponent } from './zoom-control/zoom-control.component';
@@ -15,7 +16,7 @@ import { SettingsControlComponent } from './settings-control/settings-control.co
 import { InfoBoxComponent, InfoBoxEntry } from './info-box/info-box.component';
 import { BibleViewerComponent } from './bible-viewer/bible-viewer.component';
 import { CommonModule } from '@angular/common';
-import { TimelinePoint } from './data/timeline-points';
+import { TimelineEntry } from './models/timeline-entry.model';
 
 // Animation envelope (typed)
 type ZoomAnim = {
@@ -43,12 +44,6 @@ type ZoomAnim = {
   totalDist?: number;
 };
 
-type TimelineEntry = InfoBoxEntry & {
-  yearOnly: boolean;
-  drawYf: number;
-  location?: { lat: number; lon: number; name?: string };
-};
-
 @Component({
   selector: 'app-root',
   standalone: true,
@@ -66,6 +61,7 @@ type TimelineEntry = InfoBoxEntry & {
 export class App implements AfterViewInit, OnDestroy {
   constructor(
     private dateService: TimelineDateService,
+    private timelineEntryService: TimelineEntryService,
     private hudService: TimelineHudService,
     private r2: Renderer2,
   ) {
@@ -75,8 +71,6 @@ export class App implements AfterViewInit, OnDestroy {
     }
     this.zoomLevels = this.dateService.getZoomLevels();
     this.zoomLabels = this.dateService.getZoomLabels();
-    this.TIMELINE_POINTS = this.dateService.getTimelinePoints();
-    this.timelineEntries = this.buildTimelineEntries();
   }
 
   // ── Info box state ──────────────────────────────────────────────────────────
@@ -216,8 +210,6 @@ export class App implements AfterViewInit, OnDestroy {
   }> = [];
 
   // ── Data ──────────────────────────────────────────────────────────────────────
-  private TIMELINE_POINTS: Record<string, TimelinePoint>;
-  private timelineEntries: TimelineEntry[] = [];
   private infoBoxRafId: number | null = null;
 
   // ── Sizing ────────────────────────────────────────────────────────────────────
@@ -629,71 +621,17 @@ export class App implements AfterViewInit, OnDestroy {
   private daysInYear(y: number) {
     return this.dateService.daysInYear(y);
   }
-  private startOfYearInt(yf: number) {
-    return this.dateService.startOfYearInt(yf);
-  }
-
-  private yearParseWithFlag(input: string | number): { yf: number; yearOnly: boolean } {
-    return this.dateService.yearParseWithFlag(input);
-  }
-
-  private yearFractionFromInput(input: string | number): number {
-    return this.dateService.yearFractionFromInput(input);
-  }
-
-  private buildTimelineEntries(): TimelineEntry[] {
-    const out: TimelineEntry[] = [];
-    for (const key of Object.keys(this.TIMELINE_POINTS)) {
-      const point = this.TIMELINE_POINTS[key];
-      const { yf, yearOnly } = this.yearParseWithFlag(key);
-      if (!isNaN(yf)) {
-        const drawYf = yearOnly ? this.startOfYearInt(yf) : yf;
-        out.push({
-          label: key,
-          when: point.description,
-          yf,
-          yearOnly,
-          drawYf,
-          location: point.location,
-          sources: point.sources,
-          isPrimary: false, // will be set later in updateInfoBox
-        });
-      }
-    }
-    out.sort((a, b) => a.yf - b.yf);
-    return out;
-  }
 
   private getEntries(): TimelineEntry[] {
-    return this.timelineEntries;
-  }
-
-  private lowerBoundByYf(target: number): number {
-    let lo = 0;
-    let hi = this.timelineEntries.length;
-    while (lo < hi) {
-      const mid = (lo + hi) >>> 1;
-      if (this.timelineEntries[mid].yf < target) lo = mid + 1;
-      else hi = mid;
-    }
-    return lo;
+    return this.timelineEntryService.getEntries();
   }
 
   private lowerBoundByDrawYf(target: number): number {
-    let lo = 0;
-    let hi = this.timelineEntries.length;
-    while (lo < hi) {
-      const mid = (lo + hi) >>> 1;
-      if (this.timelineEntries[mid].drawYf < target) lo = mid + 1;
-      else hi = mid;
-    }
-    return lo;
+    return this.timelineEntryService.lowerBoundByDrawYf(target);
   }
 
   private getEntriesNearYear(centerYf: number, radiusYears: number): TimelineEntry[] {
-    const start = this.lowerBoundByYf(centerYf - radiusYears);
-    const end = this.lowerBoundByYf(centerYf + radiusYears + Number.EPSILON);
-    return this.timelineEntries.slice(start, end);
+    return this.timelineEntryService.getEntriesNearYear(centerYf, radiusYears);
   }
 
   private nowYearFraction() {
