@@ -7,7 +7,6 @@ import {
   HostListener,
   Renderer2,
 } from '@angular/core';
-import { StarfieldRendererService } from './services/starfield-renderer.service';
 import { TimelineDateService, ZoomSpec } from './services/timeline-date.service';
 import { TimelineHudService } from './services/timeline-hud.service';
 import { SpaceSceneComponent } from './components/space-scene/space-scene.component';
@@ -28,10 +27,6 @@ type ZoomAnim = {
   keepYear: number | null;
   targetIdx: number;
 
-  // star tween endpoints
-  starFromScale?: number;
-  starToScale?: number;
-
   // HUD step pair
   hudFromIdx?: number;
   hudToIdx?: number;
@@ -46,6 +41,12 @@ type ZoomAnim = {
   stepDist?: number[];
   cumDist?: number[];
   totalDist?: number;
+};
+
+type TimelineEntry = InfoBoxEntry & {
+  yearOnly: boolean;
+  drawYf: number;
+  location?: { lat: number; lon: number; name?: string };
 };
 
 @Component({
@@ -64,10 +65,9 @@ type ZoomAnim = {
 })
 export class App implements AfterViewInit, OnDestroy {
   constructor(
-    private starRender: StarfieldRendererService,
     private dateService: TimelineDateService,
     private hudService: TimelineHudService,
-    private r2: Renderer2
+    private r2: Renderer2,
   ) {
     // Ensure a sensible base page title for tests and initial load
     if (!document.title || document.title.trim() === '') {
@@ -76,6 +76,7 @@ export class App implements AfterViewInit, OnDestroy {
     this.zoomLevels = this.dateService.getZoomLevels();
     this.zoomLabels = this.dateService.getZoomLabels();
     this.TIMELINE_POINTS = this.dateService.getTimelinePoints();
+    this.timelineEntries = this.buildTimelineEntries();
   }
 
   // ── Info box state ──────────────────────────────────────────────────────────
@@ -98,8 +99,8 @@ export class App implements AfterViewInit, OnDestroy {
   }
 
   private updateInfoBox() {
-    const entries = this.getEntries();
-    if (!entries.length || !this.CH || !this.GRID.spacingCSS || !this.TL.unitYears) {
+    const allEntries = this.getEntries();
+    if (!allEntries.length || !this.CH || !this.GRID.spacingCSS || !this.TL.unitYears) {
       this.infoEntries = [];
       this.infoBoxHidden = true;
       return;
@@ -114,6 +115,7 @@ export class App implements AfterViewInit, OnDestroy {
     const secondaryRange = this.TL.unitYears * 2.0; // within 2 HUD spacings
 
     const nearbyEntries: InfoBoxEntry[] = [];
+    const entries = this.getEntriesNearYear(centerYF, secondaryRange);
     let closestPrimaryWithLocation: (typeof entries)[0] | null = null;
     let closestDistance = Infinity;
 
@@ -139,7 +141,7 @@ export class App implements AfterViewInit, OnDestroy {
       if (this.spaceScene) {
         this.spaceScene.rotateTo(
           closestPrimaryWithLocation.location.lon,
-          closestPrimaryWithLocation.location.lat
+          closestPrimaryWithLocation.location.lat,
         );
       }
 
@@ -161,6 +163,14 @@ export class App implements AfterViewInit, OnDestroy {
     this.infoBoxHidden = this.infoEntries.length === 0;
   }
 
+  private scheduleInfoBoxUpdate() {
+    if (this.infoBoxRafId !== null) return;
+    this.infoBoxRafId = requestAnimationFrame(() => {
+      this.infoBoxRafId = null;
+      this.updateInfoBox();
+    });
+  }
+
   private markActiveHudLayers() {
     for (let i = 0; i < this.HUDS.length; i++) {
       const el = this.HUDS[i].el;
@@ -171,8 +181,6 @@ export class App implements AfterViewInit, OnDestroy {
   }
 
   // ── View refs ─────────────────────────────────────────────────────────────────
-  @ViewChild('starHost', { static: true }) starHost!: ElementRef<HTMLDivElement>;
-  @ViewChild('starCanvas', { static: true }) starCanvas!: ElementRef<HTMLCanvasElement>;
   @ViewChild(SpaceSceneComponent, { static: false }) spaceScene!: SpaceSceneComponent;
   @ViewChild('centerline', { static: true }) centerline!: ElementRef<HTMLCanvasElement>;
   @ViewChild('timeline', { static: true }) timeline!: ElementRef<HTMLCanvasElement>;
@@ -183,32 +191,15 @@ export class App implements AfterViewInit, OnDestroy {
   zoomLabels: string[] = [];
   currentZoomIdx = 3; // Year
 
-  // Match #levels length
-  private readonly starBaseScaleByLevel = [1.12, 1.08, 1.05, 1.0, 0.96, 0.93, 0.9];
-
   // Timing targets
   private readonly DUR_SINGLE_STEP_MS = 4000; // ~4s for 1-step jumps
   private readonly DUR_ACROSS_ALL_MS = 10000; // ~10s for full-range jumps
-
-  // ── Starfield / zoom state ───────────────────────────────────────────────────
-  private starEffectiveScale = this.starBaseScaleByLevel[this.currentZoomIdx];
-  private starZoom = {
-    active: false,
-    from: this.starBaseScaleByLevel[this.currentZoomIdx],
-    to: this.starBaseScaleByLevel[this.currentZoomIdx],
-    lockOffX: 0,
-    lockOffY: 0,
-  };
 
   private animFromIdx = this.currentZoomIdx;
   private animToIdx = this.currentZoomIdx;
 
   private centerYF: number | null = null;
   private pendingZoomIdx: number | null = null;
-
-  // Parallax drivers
-  private starParallaxScrollX = 0;
-  private starParallaxScrollY = 0;
 
   private settingScroll = false;
   private lastScrollY = 0;
@@ -226,6 +217,8 @@ export class App implements AfterViewInit, OnDestroy {
 
   // ── Data ──────────────────────────────────────────────────────────────────────
   private TIMELINE_POINTS: Record<string, TimelinePoint>;
+  private timelineEntries: TimelineEntry[] = [];
+  private infoBoxRafId: number | null = null;
 
   // ── Sizing ────────────────────────────────────────────────────────────────────
   private dpr = Math.max(1, window.devicePixelRatio || 1);
@@ -319,9 +312,6 @@ export class App implements AfterViewInit, OnDestroy {
   ngAfterViewInit(): void {
     this.buildHudLayers();
 
-    this.starRender.init(this.starCanvas.nativeElement, 512);
-    this.starRender.setDevicePixelRatio(this.DPR);
-
     // Space scene component handles its own initialization
     // Set Earth rotation speed after component is ready
     if (this.spaceScene) {
@@ -342,9 +332,7 @@ export class App implements AfterViewInit, OnDestroy {
     this.ensureScrollRoomFromBounds();
     this.clampScroll();
 
-    this.starParallaxScrollX = window.scrollX || window.pageXOffset || 0;
-    this.starParallaxScrollY = window.scrollY || window.pageYOffset || 0;
-    this.lastScrollY = this.starParallaxScrollY;
+    this.lastScrollY = window.scrollY || window.pageYOffset || 0;
 
     // show active tier
     for (const h of this.HUDS) {
@@ -352,7 +340,7 @@ export class App implements AfterViewInit, OnDestroy {
       h.el.classList.remove('hud-visible');
     }
     this.redraw();
-    setTimeout(() => this.updateInfoBox(), 0);
+    this.scheduleInfoBoxUpdate();
     setTimeout(() => {
       const el = this.HUDS[this.currentZoomIdx]?.el;
       if (el) {
@@ -379,6 +367,7 @@ export class App implements AfterViewInit, OnDestroy {
       this.earthResizeObserver = null;
     }
     if (this.earthResizeTimer) clearTimeout(this.earthResizeTimer);
+    if (this.infoBoxRafId !== null) cancelAnimationFrame(this.infoBoxRafId);
     window.removeEventListener('keydown', this.onKeyDown as any);
     if (this.resizeDoneTimer) clearTimeout(this.resizeDoneTimer);
     if (this.wheelHandler) window.removeEventListener('wheel', this.wheelHandler as any);
@@ -464,17 +453,13 @@ export class App implements AfterViewInit, OnDestroy {
 
       if (this.useVirtualWindow) {
         const mid = ((this.SCROLL_MIN ?? 0) + (this.SCROLL_MAX ?? 0)) * 0.5;
-        const sx = window.scrollX || window.pageXOffset || 0;
-        this.starRender.rebasePhaseForProgrammaticScroll(sx, mid);
         window.scrollTo(0, mid);
         this.reanchorGridForCenter(keepYear);
-        this.starParallaxScrollX = sx;
-        this.starParallaxScrollY = mid;
+        this.lastScrollY = mid;
       } else {
         const y = this.scrollForYear(keepYear) + this.SCROLL_SHIFT;
         window.scrollTo(0, y);
-        this.starParallaxScrollX = window.scrollX || window.pageXOffset || 0;
-        this.starParallaxScrollY = y;
+        this.lastScrollY = y;
       }
       this.clampScroll();
       this.redraw();
@@ -517,18 +502,13 @@ export class App implements AfterViewInit, OnDestroy {
 
     if (pushingPastTop || pushingPastBottom) {
       const keep = kyClamped;
-      const target = pushingPastTop ? this.SCROLL_MIN ?? s : this.SCROLL_MAX ?? s;
-
-      const sx = window.scrollX || window.pageXOffset || 0;
-      this.starRender.rebasePhaseForProgrammaticScroll(sx, target);
+      const target = pushingPastTop ? (this.SCROLL_MIN ?? s) : (this.SCROLL_MAX ?? s);
 
       this.settingScroll = true;
       window.scrollTo(0, target);
       this.settingScroll = false;
 
       this.reanchorGridForCenter(keep);
-      this.starParallaxScrollX = sx;
-      this.starParallaxScrollY = target;
       this.lastScrollY = target;
 
       this.redraw();
@@ -538,30 +518,12 @@ export class App implements AfterViewInit, OnDestroy {
     this.centerYF = kyClamped;
     this.reanchorGridForCenter(kyClamped);
 
-    const rawSx = window.scrollX || window.pageXOffset || 0;
-    const rawSy = s;
-    let effSy = rawSy;
-
-    if (pushingPastTop || pushingPastBottom) {
-      effSy = this.starParallaxScrollY;
-    } else {
-      if (this.SCROLL_MIN != null && rawSy <= this.SCROLL_MIN + 0.5) {
-        if (rawSy < this.starParallaxScrollY) effSy = this.starParallaxScrollY;
-      }
-      if (this.SCROLL_MAX != null && rawSy >= this.SCROLL_MAX - 0.5) {
-        if (rawSy > this.starParallaxScrollY) effSy = this.starParallaxScrollY;
-      }
-    }
-
-    this.starParallaxScrollX = rawSx;
-    this.starParallaxScrollY = effSy;
-
     if (!(pushingPastTop && s < this.lastScrollY) && !(pushingPastBottom && s > this.lastScrollY)) {
       this.lastScrollY = s;
     }
 
     this.redraw();
-    setTimeout(() => this.updateInfoBox(), 0);
+    this.scheduleInfoBoxUpdate();
     this.recenterVirtualWindowIfNeeded();
   }
 
@@ -591,15 +553,11 @@ export class App implements AfterViewInit, OnDestroy {
     }
   }
   private viewportW() {
-    const host = this.starHost?.nativeElement;
-    if (host) return host.clientWidth || window.innerWidth;
     const vv = (window as any).visualViewport;
     if (vv?.width) return vv.width;
     return window.innerWidth;
   }
   private viewportH() {
-    const host = this.starHost?.nativeElement;
-    if (host) return host.clientHeight || window.innerHeight;
     const vv = (window as any).visualViewport;
     if (vv?.height) return vv.height;
     return window.innerHeight;
@@ -609,17 +567,10 @@ export class App implements AfterViewInit, OnDestroy {
   }
   private applySize(cssW: number, cssH: number) {
     this.DPR = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
-    this.starRender.setDevicePixelRatio(this.DPR);
     const Wn = Math.floor(cssW * this.DPR),
       Hn = Math.floor(cssH * this.DPR);
     this.W = Wn;
     this.H = Hn;
-
-    const star = this.starCanvas.nativeElement;
-    star.width = this.W;
-    star.height = this.H;
-    star.style.width = cssW + 'px';
-    star.style.height = cssH + 'px';
 
     for (const h of this.HUDS) {
       h.el.width = this.W;
@@ -690,20 +641,19 @@ export class App implements AfterViewInit, OnDestroy {
     return this.dateService.yearFractionFromInput(input);
   }
 
-  private getEntries() {
-    const out: (InfoBoxEntry & {
-      yearOnly: boolean;
-      location?: { lat: number; lon: number; name?: string };
-    })[] = [];
+  private buildTimelineEntries(): TimelineEntry[] {
+    const out: TimelineEntry[] = [];
     for (const key of Object.keys(this.TIMELINE_POINTS)) {
       const point = this.TIMELINE_POINTS[key];
       const { yf, yearOnly } = this.yearParseWithFlag(key);
       if (!isNaN(yf)) {
+        const drawYf = yearOnly ? this.startOfYearInt(yf) : yf;
         out.push({
           label: key,
           when: point.description,
           yf,
           yearOnly,
+          drawYf,
           location: point.location,
           sources: point.sources,
           isPrimary: false, // will be set later in updateInfoBox
@@ -712,6 +662,38 @@ export class App implements AfterViewInit, OnDestroy {
     }
     out.sort((a, b) => a.yf - b.yf);
     return out;
+  }
+
+  private getEntries(): TimelineEntry[] {
+    return this.timelineEntries;
+  }
+
+  private lowerBoundByYf(target: number): number {
+    let lo = 0;
+    let hi = this.timelineEntries.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (this.timelineEntries[mid].yf < target) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
+
+  private lowerBoundByDrawYf(target: number): number {
+    let lo = 0;
+    let hi = this.timelineEntries.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (this.timelineEntries[mid].drawYf < target) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
+
+  private getEntriesNearYear(centerYf: number, radiusYears: number): TimelineEntry[] {
+    const start = this.lowerBoundByYf(centerYf - radiusYears);
+    const end = this.lowerBoundByYf(centerYf + radiusYears + Number.EPSILON);
+    return this.timelineEntries.slice(start, end);
   }
 
   private nowYearFraction() {
@@ -806,10 +788,6 @@ export class App implements AfterViewInit, OnDestroy {
 
   // ── Redraw ────────────────────────────────────────────────────────────────────
   private redraw(fadeFrom = 1, fadeTo = 0) {
-    this.starRender.setParallaxScroll(this.starParallaxScrollX, this.starParallaxScrollY);
-    this.starRender.setScale(this.starEffectiveScale);
-    this.starRender.draw(this.viewportW(), this.viewportH());
-
     this.drawHuds(fadeFrom, fadeTo);
     this.drawCenterline();
     this.drawTimeline();
@@ -839,7 +817,7 @@ export class App implements AfterViewInit, OnDestroy {
     Wc: number,
     Hc: number,
     unitYears: number,
-    zoomIdx?: number
+    zoomIdx?: number,
   ) {
     const idx = zoomIdx ?? this.currentZoomIdx;
     const zoomLevelName = this.zoomLevels[idx]?.name ?? 'Year';
@@ -897,7 +875,7 @@ export class App implements AfterViewInit, OnDestroy {
       this.W,
       this.H,
       this.zoomLevels[this.currentZoomIdx].unit,
-      this.currentZoomIdx
+      this.currentZoomIdx,
     );
   }
 
@@ -948,12 +926,21 @@ export class App implements AfterViewInit, OnDestroy {
     const ttx = tcv.getContext('2d')!;
     ttx.clearRect(0, 0, this.TW, this.TH);
 
+    const entries = this.getEntries();
+    if (!entries.length) return;
+
     const x = Math.round(this.TW / 2);
     const nowYF = this.nowYearFraction();
-    const pts = this.getEntries().map((p) => {
-      const yLogical = p.yearOnly ? this.startOfYearInt(p.yf) : p.yf;
-      return { ...p, x, y: this.yearToY(yLogical) };
-    });
+    const pad = Math.max(96 * this.DPR, this.TL.pointGlow * this.DPR + 48);
+    const topYf = this.yToYearDev(-pad);
+    const bottomYf = this.yToYearDev(this.TH + pad);
+    const minVisibleYf = Math.min(topYf, bottomYf);
+    const maxVisibleYf = Math.max(topYf, bottomYf);
+    const firstVisible = Math.max(0, this.lowerBoundByDrawYf(minVisibleYf) - 1);
+    const lastVisible = Math.min(
+      entries.length - 1,
+      this.lowerBoundByDrawYf(maxVisibleYf + Number.EPSILON),
+    );
 
     const lw = Math.max(1, Math.round(this.TL.lineWcss * this.DPR));
     const glow = Math.max(0, Math.round(this.TL.lineGlow * this.DPR));
@@ -969,7 +956,7 @@ export class App implements AfterViewInit, OnDestroy {
               Math.round(this.TL.lineDashCSS[0] * this.DPR),
               Math.round(this.TL.lineDashCSS[1] * this.DPR),
             ]
-          : []
+          : [],
       );
       ttx.beginPath();
       ttx.moveTo(x, y1);
@@ -979,13 +966,16 @@ export class App implements AfterViewInit, OnDestroy {
     };
 
     const ny = this.yearToY(nowYF);
-    for (let i = 0; i < pts.length - 1; i++) {
-      const a = pts[i],
-        b = pts[i + 1];
-      const y1 = a.y,
-        y2 = b.y;
+    const segmentStart = Math.max(0, firstVisible);
+    const segmentEnd = Math.min(entries.length - 2, lastVisible);
+    for (let i = segmentStart; i <= segmentEnd; i++) {
+      const a = entries[i],
+        b = entries[i + 1];
+      const y1 = this.yearToY(a.drawYf),
+        y2 = this.yearToY(b.drawYf);
       const lo = Math.min(y1, y2),
         hi = Math.max(y1, y2);
+      if (hi < -pad || lo > this.TH + pad) continue;
       if (hi <= ny) seg(y1, y2, this.TL.linePast, false);
       else if (lo >= ny) seg(y1, y2, this.TL.lineFuture, true);
       else {
@@ -998,10 +988,15 @@ export class App implements AfterViewInit, OnDestroy {
     const pGlow = Math.max(0, Math.round(this.TL.pointGlow * this.DPR));
     const font = `${Math.max(
       10,
-      Math.round(12 * this.DPR)
+      Math.round(12 * this.DPR),
     )}px system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell`;
 
-    for (const p of pts) {
+    const pointStart = Math.max(0, firstVisible);
+    const pointEnd = Math.min(entries.length - 1, lastVisible);
+    for (let i = pointStart; i <= pointEnd; i++) {
+      const p = entries[i];
+      const py = this.yearToY(p.drawYf);
+      if (py < -pad || py > this.TH + pad) continue;
       const isFuture = p.yf > nowYF;
       const color = isFuture ? this.TL.pointFuture : this.TL.pointPast;
       ttx.save();
@@ -1009,7 +1004,7 @@ export class App implements AfterViewInit, OnDestroy {
       ttx.shadowColor = color;
       ttx.fillStyle = color;
       ttx.beginPath();
-      ttx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ttx.arc(x, py, r, 0, Math.PI * 2);
       ttx.fill();
       ttx.restore();
 
@@ -1018,7 +1013,7 @@ export class App implements AfterViewInit, OnDestroy {
       ttx.textAlign = 'left';
       ttx.textBaseline = 'middle';
       ttx.fillStyle = 'rgba(255,235,200,0.96)';
-      ttx.fillText(p.label, p.x + r + Math.round(8 * this.DPR), p.y);
+      ttx.fillText(p.label, x + r + Math.round(8 * this.DPR), py);
       ttx.restore();
     }
   }
@@ -1044,17 +1039,12 @@ export class App implements AfterViewInit, OnDestroy {
     const vh = vv?.height || window.innerHeight || this.H / this.DPR;
     const pad = Math.max(this.EDGE_PAD, Math.round(vh * 0.02));
     const target = towards === 'top' ? min + pad : max - pad;
-    const sxNew = window.scrollX || window.pageXOffset || 0;
-
-    this.starRender.rebasePhaseForProgrammaticScroll(sxNew, target);
 
     this.settingScroll = true;
     window.scrollTo(0, target);
     this.settingScroll = false;
 
     this.reanchorGridForCenter(keepYear);
-    this.starParallaxScrollX = sxNew;
-    this.starParallaxScrollY = target;
     this.lastScrollY = target;
 
     this.clampScroll();
@@ -1063,17 +1053,12 @@ export class App implements AfterViewInit, OnDestroy {
 
   private recenterToVirtualMid(keepYear: number, mid?: number) {
     const m = mid ?? ((this.SCROLL_MIN ?? 0) + (this.SCROLL_MAX ?? 0)) * 0.5;
-    const sxNew = window.scrollX || window.pageXOffset || 0;
-
-    this.starRender.rebasePhaseForProgrammaticScroll(sxNew, m);
 
     this.settingScroll = true;
     window.scrollTo(0, m);
     this.settingScroll = false;
 
     this.reanchorGridForCenter(keepYear);
-    this.starParallaxScrollX = sxNew;
-    this.starParallaxScrollY = m;
     this.lastScrollY = m;
 
     this.clampScroll();
@@ -1148,18 +1133,6 @@ export class App implements AfterViewInit, OnDestroy {
     // 1) LOCK SCROLL during the whole animation
     this.lockScrollingHard();
 
-    // 2) Freeze star phase once for the entire jump
-    const lock = this.starRender.freezePhaseForZoom(
-      this.starBaseScaleByLevel[startIdx],
-      this.starBaseScaleByLevel[endIdx]
-    );
-    this.starZoom.active = true;
-    this.starZoom.from = lock.fromScale;
-    this.starZoom.to = lock.toScale;
-    this.starZoom.lockOffX = lock.lockOffX;
-    this.starZoom.lockOffY = lock.lockOffY;
-    this.starEffectiveScale = this.starZoom.from;
-
     // First HUD pair opacities only
     const fromIdxSeed = startIdx;
     const toIdxSeed = startIdx + dir;
@@ -1195,7 +1168,7 @@ export class App implements AfterViewInit, OnDestroy {
     const norm = allSteps > 1 ? (steps - 1) / (allSteps - 1) : 0; // 0..1
     const emph = norm * norm; // bias more compression for longer jumps
     const totalDur = Math.round(
-      this.DUR_SINGLE_STEP_MS + (this.DUR_ACROSS_ALL_MS - this.DUR_SINGLE_STEP_MS) * emph
+      this.DUR_SINGLE_STEP_MS + (this.DUR_ACROSS_ALL_MS - this.DUR_SINGLE_STEP_MS) * emph,
     );
 
     // Live caption during transition
@@ -1214,9 +1187,6 @@ export class App implements AfterViewInit, OnDestroy {
       endUnit,
       keepYear,
       targetIdx: endIdx,
-
-      starFromScale: this.starZoom.from,
-      starToScale: this.starZoom.to,
 
       hudFromIdx: fromIdxSeed,
       hudToIdx: toIdxSeed,
@@ -1257,7 +1227,7 @@ export class App implements AfterViewInit, OnDestroy {
     // Global progress 0..1
     const g = this.clamp(elapsed / totalMs, 0, 1);
 
-    // Spaceship profile for BOTH stars and HUD path
+    // Smooth zoom profile for the HUD path.
     const ship = this.accelCruiseDecel(g, 0.36, 0.36);
 
     // Path info
@@ -1289,13 +1259,6 @@ export class App implements AfterViewInit, OnDestroy {
     const ky = this._ZOOM_ANIM.keepYear!;
     this.centerYF = this.clampCenterToData(ky);
     this.reanchorGridForCenter(ky);
-
-    // Stars follow the same "ship" progress
-    this.starEffectiveScale = this.lerp(
-      this._ZOOM_ANIM.starFromScale!,
-      this._ZOOM_ANIM.starToScale!,
-      ship
-    );
 
     // Active HUD pair & fade
     const startIdx = this._ZOOM_ANIM.startIdx!;
@@ -1371,18 +1334,14 @@ export class App implements AfterViewInit, OnDestroy {
       const yTarget = this.scrollForYear(ky) + this.SCROLL_SHIFT;
       window.scrollTo(0, yTarget);
       this.clampScroll();
-      this.starParallaxScrollX = window.scrollX || window.pageXOffset || 0;
-      this.starParallaxScrollY = yTarget;
+      this.lastScrollY = yTarget;
     }
-
-    this.starZoom.active = false;
-    this.starEffectiveScale = this.starBaseScaleByLevel[this.currentZoomIdx];
-    this.starRender.endZoomFreezeAndMatchPhase();
 
     // Unlock scroll AFTER the final frame
     this.unlockScrollingHard();
 
     this.redraw();
+    this.scheduleInfoBoxUpdate();
 
     // Restore CSS-driven visibility
     for (let j = 0; j < this.HUDS.length; j++) {
