@@ -10,6 +10,7 @@ import {
 import { TimelineDateService, ZoomSpec } from './services/timeline-date.service';
 import { TimelineEntryService } from './services/timeline-entry.service';
 import { TimelineHudService } from './services/timeline-hud.service';
+import { TimelineRendererService } from './services/timeline-renderer.service';
 import { SpaceSceneComponent } from './components/space-scene/space-scene.component';
 import { ZoomControlComponent } from './zoom-control/zoom-control.component';
 import { SettingsControlComponent } from './settings-control/settings-control.component';
@@ -63,6 +64,7 @@ export class App implements AfterViewInit, OnDestroy {
     private dateService: TimelineDateService,
     private timelineEntryService: TimelineEntryService,
     private hudService: TimelineHudService,
+    private timelineRenderer: TimelineRendererService,
     private r2: Renderer2,
   ) {
     // Ensure a sensible base page title for tests and initial load
@@ -860,100 +862,18 @@ export class App implements AfterViewInit, OnDestroy {
   }
 
   private drawTimeline() {
-    const tcv = this.timeline.nativeElement;
-    const ttx = tcv.getContext('2d')!;
-    ttx.clearRect(0, 0, this.TW, this.TH);
-
-    const entries = this.getEntries();
-    if (!entries.length) return;
-
-    const x = Math.round(this.TW / 2);
-    const nowYF = this.nowYearFraction();
-    const pad = Math.max(96 * this.DPR, this.TL.pointGlow * this.DPR + 48);
-    const topYf = this.yToYearDev(-pad);
-    const bottomYf = this.yToYearDev(this.TH + pad);
-    const minVisibleYf = Math.min(topYf, bottomYf);
-    const maxVisibleYf = Math.max(topYf, bottomYf);
-    const firstVisible = Math.max(0, this.lowerBoundByDrawYf(minVisibleYf) - 1);
-    const lastVisible = Math.min(
-      entries.length - 1,
-      this.lowerBoundByDrawYf(maxVisibleYf + Number.EPSILON),
-    );
-
-    const lw = Math.max(1, Math.round(this.TL.lineWcss * this.DPR));
-    const glow = Math.max(0, Math.round(this.TL.lineGlow * this.DPR));
-    const seg = (y1: number, y2: number, color: string, dash: boolean) => {
-      ttx.save();
-      ttx.lineWidth = lw;
-      ttx.strokeStyle = color;
-      ttx.shadowBlur = glow;
-      ttx.shadowColor = color;
-      ttx.setLineDash(
-        dash
-          ? [
-              Math.round(this.TL.lineDashCSS[0] * this.DPR),
-              Math.round(this.TL.lineDashCSS[1] * this.DPR),
-            ]
-          : [],
-      );
-      ttx.beginPath();
-      ttx.moveTo(x, y1);
-      ttx.lineTo(x, y2);
-      ttx.stroke();
-      ttx.restore();
-    };
-
-    const ny = this.yearToY(nowYF);
-    const segmentStart = Math.max(0, firstVisible);
-    const segmentEnd = Math.min(entries.length - 2, lastVisible);
-    for (let i = segmentStart; i <= segmentEnd; i++) {
-      const a = entries[i],
-        b = entries[i + 1];
-      const y1 = this.yearToY(a.drawYf),
-        y2 = this.yearToY(b.drawYf);
-      const lo = Math.min(y1, y2),
-        hi = Math.max(y1, y2);
-      if (hi < -pad || lo > this.TH + pad) continue;
-      if (hi <= ny) seg(y1, y2, this.TL.linePast, false);
-      else if (lo >= ny) seg(y1, y2, this.TL.lineFuture, true);
-      else {
-        seg(y1, ny, this.TL.linePast, false);
-        seg(ny, y2, this.TL.lineFuture, true);
-      }
-    }
-
-    const r = Math.max(2, Math.round(this.TL.pointRcss * this.DPR));
-    const pGlow = Math.max(0, Math.round(this.TL.pointGlow * this.DPR));
-    const font = `${Math.max(
-      10,
-      Math.round(12 * this.DPR),
-    )}px system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell`;
-
-    const pointStart = Math.max(0, firstVisible);
-    const pointEnd = Math.min(entries.length - 1, lastVisible);
-    for (let i = pointStart; i <= pointEnd; i++) {
-      const p = entries[i];
-      const py = this.yearToY(p.drawYf);
-      if (py < -pad || py > this.TH + pad) continue;
-      const isFuture = p.yf > nowYF;
-      const color = isFuture ? this.TL.pointFuture : this.TL.pointPast;
-      ttx.save();
-      ttx.shadowBlur = pGlow;
-      ttx.shadowColor = color;
-      ttx.fillStyle = color;
-      ttx.beginPath();
-      ttx.arc(x, py, r, 0, Math.PI * 2);
-      ttx.fill();
-      ttx.restore();
-
-      ttx.save();
-      ttx.font = font;
-      ttx.textAlign = 'left';
-      ttx.textBaseline = 'middle';
-      ttx.fillStyle = 'rgba(255,235,200,0.96)';
-      ttx.fillText(p.label, x + r + Math.round(8 * this.DPR), py);
-      ttx.restore();
-    }
+    this.timelineRenderer.drawTimeline({
+      canvas: this.timeline.nativeElement,
+      canvasWidth: this.TW,
+      canvasHeight: this.TH,
+      dpr: this.DPR,
+      entries: this.getEntries(),
+      nowYearFraction: this.nowYearFraction(),
+      style: this.TL,
+      yearToY: this.yearToY.bind(this),
+      yToYearDev: this.yToYearDev.bind(this),
+      lowerBoundByDrawYf: this.lowerBoundByDrawYf.bind(this),
+    });
   }
 
   // ── Virtual window helpers ────────────────────────────────────────────────────
