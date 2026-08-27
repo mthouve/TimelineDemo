@@ -63,6 +63,70 @@ export const TIMELINE_POINTS: Record<string, TimelinePoint> = {
       },
     ],
   },
+  '599 B.C.E.': {
+    description:
+      'Approximate global context marker: Chavin de Huantar was an active ceremonial and pilgrimage center in the Andean highlands.',
+    location: { lat: -9.5938, lon: -77.1772, name: 'Chavin de Huantar, Peru' },
+    sources: [
+      {
+        type: 'link',
+        title: 'UNESCO: Chavin Archaeological Site',
+        label: 'UNESCO',
+        url: 'https://whc.unesco.org/en/list/330/',
+      },
+      {
+        type: 'link',
+        title: 'Smarthistory: Chavin de Huantar',
+        label: 'Smarthistory',
+        url: 'https://smarthistory.org/chavin-de-huantar/',
+      },
+    ],
+  },
+  '598 B.C.E.': {
+    description:
+      'Approximate global context marker: La Venta remained a major Olmec ceremonial center in Mesoamerica.',
+    location: { lat: 18.103, lon: -94.041, name: 'La Venta, Tabasco, Mexico' },
+    sources: [
+      {
+        type: 'link',
+        title: 'Wikipedia: La Venta',
+        label: 'Wikipedia',
+        url: 'https://en.wikipedia.org/wiki/La_Venta',
+      },
+      {
+        type: 'link',
+        title: 'Wikipedia: Olmec',
+        label: 'Wikipedia',
+        url: 'https://en.wikipedia.org/wiki/Olmecs',
+      },
+    ],
+  },
+  '597 B.C.E.': {
+    description:
+      'Approximate global context marker: Paracas communities were developing along the south coast of Peru.',
+    location: { lat: -13.8667, lon: -76.2667, name: 'Paracas Peninsula, Peru' },
+    sources: [
+      {
+        type: 'link',
+        title: 'Wikipedia: Paracas culture',
+        label: 'Wikipedia',
+        url: 'https://en.wikipedia.org/wiki/Paracas_culture',
+      },
+    ],
+  },
+  '596 B.C.E.': {
+    description:
+      'Approximate global context marker: Chavin artistic and religious influence was spreading through coastal and highland Peru.',
+    location: { lat: -12.0464, lon: -77.0428, name: 'Central coast of Peru' },
+    sources: [
+      {
+        type: 'link',
+        title: 'OpenStax: Early Cultures and Civilizations in the Americas',
+        label: 'OpenStax',
+        url: 'https://openstax.org/books/world-history-volume-1/pages/8-2-early-cultures-and-civilizations-in-the-americas',
+      },
+    ],
+  },
   'c. 7 B.C.E.': {
     description: 'Announcement of Birth of John at the Temple (Luke 1:5-25).',
     location: { lat: 31.464, lon: 35.1408, name: 'Jerusalem' },

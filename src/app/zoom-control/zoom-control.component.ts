@@ -76,7 +76,7 @@ import { CommonModule } from '@angular/common';
         font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell;
         font-size: 13px;
         margin-bottom: 6px;
-        text-align: center;
+        text-align: left;
       }
 
       .sliderWrap {

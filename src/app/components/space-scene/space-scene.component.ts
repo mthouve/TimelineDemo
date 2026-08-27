@@ -16,7 +16,7 @@ import * as THREE from 'three';
  * Renders a 3D scene containing:
  * - Earth globe with realistic textures (land, water, clouds, atmosphere)
  * - Starfield background sphere
- * - Directional sun light
+ * - Orbiting sun light and visible sun disc
  * - Location marker with animated transitions
  */
 @Component({
@@ -56,7 +56,7 @@ import * as THREE from 'three';
 export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
   @ViewChild('sceneCanvas', { static: true }) canvasRef!: ElementRef<HTMLCanvasElement>;
 
-  @Input() earthRotationsPerSecond = 1 / 60; // Default: one rotation per minute
+  @Input() earthRotationsPerSecond = 1 / 60; // Default: one simulated day per minute
   @Output() sceneReady = new EventEmitter<void>();
 
   private scene!: THREE.Scene;
@@ -66,11 +66,33 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
   private starSphere: THREE.Mesh | null = null;
   private starTexture: THREE.Texture | null = null;
 
-  private readonly STAR_BG_FOLLOW = 0.18; // subtle parallax follow factor
-  private starfieldRotation = 0; // accumulated starfield rotation (annual orbit simulation)
   private lastTimeMs: number | null = null;
 
   private sunLight!: THREE.PointLight;
+  private sunSprite: THREE.Sprite | null = null;
+  private sunTexture: THREE.CanvasTexture | null = null;
+  private sunSpriteMaterial: THREE.SpriteMaterial | null = null;
+  private sunOrbitPhase = 0;
+  private sunYearPhase = 0;
+  private timeAnimation: {
+    active: boolean;
+    startTime: number;
+    duration: number;
+    startSunOrbitPhase: number;
+    targetSunOrbitPhase: number;
+    startSunYearPhase: number;
+    targetSunYearPhase: number;
+  } | null = null;
+  private readonly DAYS_PER_SOLAR_YEAR = 365.2422;
+  private readonly AXIAL_TILT_RAD = THREE.MathUtils.degToRad(23.44);
+  private readonly SUN_LIGHT_DISTANCE = 650;
+  private readonly SUN_VISUAL_ORBIT_RADIUS = 3.8;
+  private readonly SUN_CAMERA_HIDE_PAD = 0.2;
+  private readonly STAR_ANNUAL_AXIS = new THREE.Vector3(0, 1, 0);
+  private readonly localSunDirection = new THREE.Vector3();
+  private readonly worldSunDirection = new THREE.Vector3();
+  private readonly visualSunPosition = new THREE.Vector3();
+  private readonly annualStarRotation = new THREE.Quaternion();
   private earthGeometry!: THREE.SphereGeometry;
   private baseMaterial!: THREE.MeshPhongMaterial;
   private waterDiffuseMaterial!: THREE.MeshPhongMaterial;
@@ -142,15 +164,17 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     this.waterDiffuseMaterial?.dispose();
     this.waterSpecMaterial?.dispose();
     this.cloudsMaterial?.dispose();
+    this.sunSpriteMaterial?.dispose();
 
     // Dispose textures
     this.starTexture?.dispose();
+    this.sunTexture?.dispose();
   }
 
   /**
    * Public API: Rotate Earth to show specific coordinates
    */
-  public rotateTo(longitude: number, latitude: number, durationMs = 2000): void {
+  public rotateTo(longitude: number, latitude: number, durationMs = 2000, elapsedYears = 0): void {
     if (!this.earthGroup) return;
 
     // Spherical coordinates: latitude (phi), longitude (theta)
@@ -171,6 +195,8 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
       targetRotation: { x: targetX, y: targetY },
     };
 
+    this.startTimeTransition(elapsedYears, durationMs);
+
     // Update marker position
     this.currentMarkerPosition = { lat: latitude, lon: longitude };
   }
@@ -185,7 +211,7 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
   }
 
   /**
-   * Public API: Update Earth rotation speed
+   * Public API: Update simulated day-cycle speed
    */
   public setEarthRotationsPerSecond(rps: number): void {
     this.earthRotationsPerSecond = THREE.MathUtils.clamp(rps, 0, 60);
@@ -225,14 +251,16 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     // const ambientLight = new THREE.AmbientLight(0xffffff, 0.05);
     // this.scene.add(ambientLight);
 
-    const hemiLight = new THREE.HemisphereLight(0x7fbfff, 0x0d1a26, 0.38);
+    const hemiLight = new THREE.HemisphereLight(0x7fbfff, 0x05080c, 0.1);
     this.scene.add(hemiLight);
 
-    // Sun (DirectionalLight) much brighter
+    // Sun light moves around the Earth to simulate day/night without rotating the globe.
     this.sunLight = new THREE.PointLight(0xffffff, 250000.0);
-    this.sunLight.position.set(400, 400, 500);
+    this.sunLight.position.set(0, 80, this.SUN_LIGHT_DISTANCE);
     this.sunLight.castShadow = true;
     this.scene.add(this.sunLight);
+    this.createSunSprite();
+    this.updateSunOrbit(0);
   }
 
   private loadStarfield(): void {
@@ -440,6 +468,138 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     }
   }
 
+  private createSunSprite(): void {
+    const size = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const center = size / 2;
+    const gradient = ctx.createRadialGradient(center, center, 0, center, center, center);
+    gradient.addColorStop(0, 'rgba(255,255,245,1)');
+    gradient.addColorStop(0.16, 'rgba(255,245,160,1)');
+    gradient.addColorStop(0.42, 'rgba(255,195,70,0.75)');
+    gradient.addColorStop(0.72, 'rgba(255,130,30,0.22)');
+    gradient.addColorStop(1, 'rgba(255,90,0,0)');
+
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, size, size);
+
+    this.sunTexture = new THREE.CanvasTexture(canvas);
+    this.sunTexture.colorSpace = THREE.SRGBColorSpace;
+
+    this.sunSpriteMaterial = new THREE.SpriteMaterial({
+      map: this.sunTexture,
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.95,
+      blending: THREE.AdditiveBlending,
+      depthTest: true,
+      depthWrite: false,
+    });
+
+    this.sunSprite = new THREE.Sprite(this.sunSpriteMaterial);
+    this.sunSprite.renderOrder = 5;
+    this.scene.add(this.sunSprite);
+  }
+
+  private startTimeTransition(elapsedYears: number, durationMs: number): void {
+    if (!Number.isFinite(elapsedYears) || Math.abs(elapsedYears) < 1e-7) {
+      this.timeAnimation = null;
+      return;
+    }
+
+    const elapsedDays = elapsedYears * this.DAYS_PER_SOLAR_YEAR;
+    const sunOrbitDelta = elapsedDays * Math.PI * 2;
+    const sunYearDelta = elapsedYears * Math.PI * 2;
+
+    this.timeAnimation = {
+      active: true,
+      startTime: performance.now(),
+      duration: durationMs,
+      startSunOrbitPhase: this.sunOrbitPhase,
+      targetSunOrbitPhase: this.sunOrbitPhase + sunOrbitDelta,
+      startSunYearPhase: this.sunYearPhase,
+      targetSunYearPhase: this.sunYearPhase + sunYearDelta,
+    };
+  }
+
+  private updateSunOrbit(deltaSeconds: number): void {
+    if (!this.sunLight) return;
+
+    const omega = Math.PI * 2 * this.earthRotationsPerSecond;
+    this.sunOrbitPhase = (this.sunOrbitPhase + omega * deltaSeconds) % (Math.PI * 2);
+    this.sunYearPhase =
+      (this.sunYearPhase + (omega / this.DAYS_PER_SOLAR_YEAR) * deltaSeconds) % (Math.PI * 2);
+
+    this.applySunOrbit();
+  }
+
+  private updateTimeTransition(now: number): boolean {
+    if (!this.timeAnimation?.active) return false;
+
+    const anim = this.timeAnimation;
+    const t = Math.min(1, (now - anim.startTime) / anim.duration);
+    const eased = this.easeInOutCubic(t);
+
+    this.sunOrbitPhase =
+      anim.startSunOrbitPhase + (anim.targetSunOrbitPhase - anim.startSunOrbitPhase) * eased;
+    this.sunYearPhase =
+      anim.startSunYearPhase + (anim.targetSunYearPhase - anim.startSunYearPhase) * eased;
+
+    if (t >= 1) {
+      this.sunOrbitPhase = THREE.MathUtils.euclideanModulo(this.sunOrbitPhase, Math.PI * 2);
+      this.sunYearPhase = THREE.MathUtils.euclideanModulo(this.sunYearPhase, Math.PI * 2);
+      anim.active = false;
+    }
+
+    this.applySunOrbit();
+    return true;
+  }
+
+  private applySunOrbit(): void {
+    if (!this.sunLight) return;
+
+    const declination = this.AXIAL_TILT_RAD * Math.sin(this.sunYearPhase);
+    const orbitRadiusAtDeclination = Math.cos(declination);
+    const orbitalX = Math.sin(this.sunOrbitPhase) * orbitRadiusAtDeclination;
+    const orbitalY = Math.sin(declination);
+    const orbitalZ = Math.cos(this.sunOrbitPhase) * orbitRadiusAtDeclination;
+    this.localSunDirection.set(orbitalX, orbitalY, orbitalZ).normalize();
+    this.worldSunDirection.copy(this.localSunDirection);
+    if (this.earthGroup) {
+      this.worldSunDirection.applyQuaternion(this.earthGroup.quaternion);
+    }
+
+    this.sunLight.position.copy(this.worldSunDirection).multiplyScalar(this.SUN_LIGHT_DISTANCE);
+
+    if (this.starSphere) {
+      this.annualStarRotation.setFromAxisAngle(this.STAR_ANNUAL_AXIS, -this.sunYearPhase);
+      this.starSphere.quaternion.copy(this.annualStarRotation);
+      if (this.earthGroup) {
+        this.starSphere.quaternion.premultiply(this.earthGroup.quaternion);
+      }
+    }
+
+    if (!this.sunSprite) return;
+
+    const visualPosition = this.visualSunPosition
+      .copy(this.worldSunDirection)
+      .multiplyScalar(this.SUN_VISUAL_ORBIT_RADIUS);
+
+    this.sunSprite.position.copy(visualPosition);
+
+    const viewerSideAmount = THREE.MathUtils.clamp((this.worldSunDirection.z + 1) / 2, 0, 1);
+    const sunScale = THREE.MathUtils.lerp(0.45, 2.8, viewerSideAmount);
+    this.sunSprite.scale.set(sunScale, sunScale, 1);
+
+    // When the sun reaches the viewer side, it passes behind the camera and out of frame.
+    this.sunSprite.visible = visualPosition.z < this.camera.position.z - this.SUN_CAMERA_HIDE_PAD;
+  }
+
   // Update the viewVector uniform for the atmosphere each frame
   private animate = (): void => {
     this.animationFrameId = requestAnimationFrame(this.animate);
@@ -449,12 +609,8 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     this.lastTimeMs = now;
 
     const clampedDt = Math.min(dtSec, 0.1);
-    const omega = Math.PI * 2 * this.earthRotationsPerSecond;
-    const rotationDelta = omega * clampedDt;
-
-    // Animate clouds and cloud shadows (slow rotation)
-    if (this.cloudsMesh) {
-      this.cloudsMesh.rotation.y += 0.0015 * clampedDt; // Realistically slow
+    if (!this.updateTimeTransition(now)) {
+      this.updateSunOrbit(clampedDt);
     }
 
     // Earth rotation animation
@@ -469,11 +625,6 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
         anim.startRotation.y + (anim.targetRotation.y - anim.startRotation.y) * eased;
       if (t >= 1) {
         anim.active = false;
-      }
-    } else {
-      // Continuous rotation
-      if (this.earthGroup) {
-        this.earthGroup.rotation.y += rotationDelta;
       }
     }
 

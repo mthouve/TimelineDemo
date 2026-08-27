@@ -111,10 +111,24 @@ export class App implements AfterViewInit, OnDestroy {
     // Rotate Earth to show location if we have a primary entry with coordinates
     if (closestPrimaryWithLocation?.location) {
       if (this.spaceScene) {
-        this.spaceScene.rotateTo(
-          closestPrimaryWithLocation.location.lon,
-          closestPrimaryWithLocation.location.lat,
-        );
+        const targetKey = this.spaceSceneEntryKey(closestPrimaryWithLocation);
+
+        if (targetKey !== this.activeSpaceSceneEntryKey) {
+          const elapsedYears =
+            this.activeSpaceSceneEntryYear == null
+              ? 0
+              : closestPrimaryWithLocation.yf - this.activeSpaceSceneEntryYear;
+          const durationMs = this.spaceSceneTransitionDurationMs(elapsedYears);
+
+          this.activeSpaceSceneEntryKey = targetKey;
+          this.activeSpaceSceneEntryYear = closestPrimaryWithLocation.yf;
+          this.spaceScene.rotateTo(
+            closestPrimaryWithLocation.location.lon,
+            closestPrimaryWithLocation.location.lat,
+            durationMs,
+            elapsedYears,
+          );
+        }
       }
 
       // Calculate marker opacity based on distance (fade out over 2x primary range)
@@ -133,6 +147,21 @@ export class App implements AfterViewInit, OnDestroy {
     // Already in chronological order, just limit total count
     this.infoEntries = nearbyEntries.slice(0, 16);
     this.infoBoxHidden = this.infoEntries.length === 0;
+  }
+
+  private spaceSceneEntryKey(entry: TimelineEntry): string {
+    return `${entry.label}|${entry.location?.lat ?? ''}|${entry.location?.lon ?? ''}`;
+  }
+
+  private spaceSceneTransitionDurationMs(elapsedYears: number): number {
+    const spanYears = Math.abs(elapsedYears);
+    if (!spanYears) return this.SPACE_SCENE_MIN_TRANSITION_MS;
+
+    return this.clamp(
+      this.SPACE_SCENE_MIN_TRANSITION_MS + Math.log1p(spanYears) * 1200,
+      this.SPACE_SCENE_MIN_TRANSITION_MS,
+      this.SPACE_SCENE_MAX_TRANSITION_MS,
+    );
   }
 
   private scheduleInfoBoxUpdate() {
@@ -189,6 +218,10 @@ export class App implements AfterViewInit, OnDestroy {
 
   // ── Data ──────────────────────────────────────────────────────────────────────
   private infoBoxRafId: number | null = null;
+  private activeSpaceSceneEntryKey: string | null = null;
+  private activeSpaceSceneEntryYear: number | null = null;
+  private readonly SPACE_SCENE_MIN_TRANSITION_MS = 2200;
+  private readonly SPACE_SCENE_MAX_TRANSITION_MS = 9000;
 
   // ── Sizing ────────────────────────────────────────────────────────────────────
   private dpr = Math.max(1, window.devicePixelRatio || 1);
@@ -283,9 +316,9 @@ export class App implements AfterViewInit, OnDestroy {
     this.buildHudLayers();
 
     // Space scene component handles its own initialization
-    // Set Earth rotation speed after component is ready
+    // Set simulated sun day-cycle speed after component is ready
     if (this.spaceScene) {
-      this.spaceScene.setEarthRotationsPerSecond(1 / 3600);
+      this.spaceScene.setEarthRotationsPerSecond(1 / 15);
     }
 
     this.sizeAll();
