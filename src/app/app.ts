@@ -177,6 +177,12 @@ export class App implements AfterViewInit, OnDestroy {
     });
   }
 
+  private scheduleProgressionInfoBoxUpdate(now: number) {
+    if (now - this.lastProgressionInfoBoxUpdateMs < this.PROGRESSION_INFO_BOX_INTERVAL_MS) return;
+    this.lastProgressionInfoBoxUpdateMs = now;
+    this.scheduleInfoBoxUpdate();
+  }
+
   private markActiveHudLayers() {
     for (let i = 0; i < this.HUDS.length; i++) {
       const el = this.HUDS[i].el;
@@ -231,6 +237,8 @@ export class App implements AfterViewInit, OnDestroy {
 
   // ── Data ──────────────────────────────────────────────────────────────────────
   private infoBoxRafId: number | null = null;
+  private lastProgressionInfoBoxUpdateMs = 0;
+  private readonly PROGRESSION_INFO_BOX_INTERVAL_MS = 250;
   private activeSpaceSceneEntryKey: string | null = null;
   private activeSpaceSceneEntryYear: number | null = null;
   private timeProgressionRafId: number | null = null;
@@ -706,7 +714,7 @@ export class App implements AfterViewInit, OnDestroy {
         this.reanchorGridForCenter(targetYear);
         this.spaceScene?.setCelestialYearFraction(targetYear);
         this.redraw();
-        this.scheduleInfoBoxUpdate();
+        this.scheduleProgressionInfoBoxUpdate(now);
       }
     }
 

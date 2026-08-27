@@ -96,17 +96,25 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
   private readonly MOON_ORBIT_RADIUS = 1.45;
   private readonly MOON_RADIUS = 0.075;
   private readonly MOON_ORBIT_INCLINATION_RAD = THREE.MathUtils.degToRad(5.14);
+  private readonly ECLIPSE_SHADOW_RADIUS = 0.24;
+  private readonly ECLIPSE_SHADOW_INNER_ANGLE_RAD = THREE.MathUtils.degToRad(1.5);
+  private readonly ECLIPSE_SHADOW_OUTER_ANGLE_RAD = THREE.MathUtils.degToRad(9);
   private readonly STAR_ANNUAL_AXIS = new THREE.Vector3(0, 1, 0);
+  private readonly SHADOW_PLANE_NORMAL = new THREE.Vector3(0, 0, 1);
   private readonly localSunDirection = new THREE.Vector3();
   private readonly worldSunDirection = new THREE.Vector3();
   private readonly localMoonDirection = new THREE.Vector3();
   private readonly worldMoonDirection = new THREE.Vector3();
+  private readonly localShadowDirection = new THREE.Vector3();
   private readonly visualSunPosition = new THREE.Vector3();
   private readonly annualStarRotation = new THREE.Quaternion();
   private earthGeometry!: THREE.SphereGeometry;
   private moonGeometry!: THREE.SphereGeometry;
   private moonTexture: THREE.Texture | null = null;
   private moonMaterial!: THREE.MeshPhongMaterial;
+  private eclipseShadowGeometry!: THREE.PlaneGeometry;
+  private eclipseShadowTexture: THREE.CanvasTexture | null = null;
+  private eclipseShadowMaterial!: THREE.MeshBasicMaterial;
   private baseMaterial!: THREE.MeshPhongMaterial;
   private waterDiffuseMaterial!: THREE.MeshPhongMaterial;
   private waterSpecMaterial!: THREE.ShaderMaterial;
@@ -119,6 +127,7 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
   private waterSpecMesh!: THREE.Mesh;
   private cloudsMesh!: THREE.Mesh;
   private moonMesh: THREE.Mesh | null = null;
+  private eclipseShadowMesh: THREE.Mesh | null = null;
   private earthTextureReady = {
     base: false,
     topography: false,
@@ -181,11 +190,14 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     this.sunSpriteMaterial?.dispose();
     this.moonGeometry?.dispose();
     this.moonMaterial?.dispose();
+    this.eclipseShadowGeometry?.dispose();
+    this.eclipseShadowMaterial?.dispose();
 
     // Dispose textures
     this.starTexture?.dispose();
     this.sunTexture?.dispose();
     this.moonTexture?.dispose();
+    this.eclipseShadowTexture?.dispose();
   }
 
   /**
@@ -293,6 +305,7 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     this.setupLighting();
     this.loadStarfield();
     this.createEarth();
+    this.createEclipseShadow();
     this.createMoon();
     this.createMarker();
   }
@@ -538,6 +551,47 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     this.applyMoonOrbit();
   }
 
+  private createEclipseShadow(): void {
+    if (!this.earthGroup) return;
+
+    const size = 128;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const center = size / 2;
+    const gradient = ctx.createRadialGradient(center, center, 0, center, center, center);
+    gradient.addColorStop(0, 'rgba(0,0,0,0.78)');
+    gradient.addColorStop(0.3, 'rgba(0,0,0,0.48)');
+    gradient.addColorStop(0.68, 'rgba(0,0,0,0.16)');
+    gradient.addColorStop(1, 'rgba(0,0,0,0)');
+
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, size, size);
+
+    this.eclipseShadowTexture = new THREE.CanvasTexture(canvas);
+    this.eclipseShadowGeometry = new THREE.PlaneGeometry(1, 1);
+    this.eclipseShadowMaterial = new THREE.MeshBasicMaterial({
+      map: this.eclipseShadowTexture,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      depthTest: true,
+      side: THREE.FrontSide,
+    });
+    this.eclipseShadowMaterial.polygonOffset = true;
+    this.eclipseShadowMaterial.polygonOffsetFactor = -3;
+    this.eclipseShadowMaterial.polygonOffsetUnits = -3;
+
+    this.eclipseShadowMesh = new THREE.Mesh(this.eclipseShadowGeometry, this.eclipseShadowMaterial);
+    this.eclipseShadowMesh.renderOrder = 28;
+    this.eclipseShadowMesh.visible = false;
+    this.earthGroup.add(this.eclipseShadowMesh);
+  }
+
   private createSunSprite(): void {
     const size = 256;
     const canvas = document.createElement('canvas');
@@ -745,11 +799,45 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
 
     this.moonMesh.position.copy(this.worldMoonDirection).multiplyScalar(this.MOON_ORBIT_RADIUS);
     this.moonMesh.visible = this.worldMoonDirection.z > -0.92;
+    this.applyEclipseShadow();
   }
 
   private lunarPhaseForYearFraction(yearFraction: number): number {
     const elapsedDays = yearFraction * this.DAYS_PER_SOLAR_YEAR;
     return THREE.MathUtils.euclideanModulo(elapsedDays / this.LUNAR_MONTH_DAYS, 1) * this.TWO_PI;
+  }
+
+  private applyEclipseShadow(): void {
+    if (!this.eclipseShadowMesh || !this.eclipseShadowMaterial) return;
+
+    const alignmentAngle = this.localSunDirection.angleTo(this.localMoonDirection);
+    if (alignmentAngle > this.ECLIPSE_SHADOW_OUTER_ANGLE_RAD) {
+      this.eclipseShadowMesh.visible = false;
+      this.eclipseShadowMaterial.opacity = 0;
+      return;
+    }
+
+    const alignment = 1 - this.smoothstep(
+      this.ECLIPSE_SHADOW_INNER_ANGLE_RAD,
+      this.ECLIPSE_SHADOW_OUTER_ANGLE_RAD,
+      alignmentAngle
+    );
+    const opacity = alignment * 0.78;
+
+    this.localShadowDirection.copy(this.localMoonDirection).normalize();
+    this.eclipseShadowMesh.position.copy(this.localShadowDirection).multiplyScalar(1.011);
+    this.eclipseShadowMesh.quaternion.setFromUnitVectors(
+      this.SHADOW_PLANE_NORMAL,
+      this.localShadowDirection
+    );
+    this.eclipseShadowMesh.scale.setScalar(this.ECLIPSE_SHADOW_RADIUS);
+    this.eclipseShadowMesh.visible = opacity > 0.01;
+    this.eclipseShadowMaterial.opacity = opacity;
+  }
+
+  private smoothstep(edge0: number, edge1: number, value: number): number {
+    const x = THREE.MathUtils.clamp((value - edge0) / (edge1 - edge0), 0, 1);
+    return x * x * (3 - 2 * x);
   }
 
   // Update the viewVector uniform for the atmosphere each frame
