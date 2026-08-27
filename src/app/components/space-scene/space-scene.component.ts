@@ -56,7 +56,7 @@ import * as THREE from 'three';
 export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
   @ViewChild('sceneCanvas', { static: true }) canvasRef!: ElementRef<HTMLCanvasElement>;
 
-  @Input() earthRotationsPerSecond = 1 / 60; // Default: one simulated day per minute
+  @Input() earthRotationsPerSecond = 0; // Default: time progression off
   @Output() sceneReady = new EventEmitter<void>();
 
   private scene!: THREE.Scene;
@@ -74,15 +74,19 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
   private sunSpriteMaterial: THREE.SpriteMaterial | null = null;
   private sunOrbitPhase = 0;
   private sunYearPhase = 0;
+  private currentCelestialYearFraction = 0;
   private timeAnimation: {
     active: boolean;
     startTime: number;
     duration: number;
+    startCelestialYearFraction: number;
+    targetCelestialYearFraction: number;
     startSunOrbitPhase: number;
     targetSunOrbitPhase: number;
     startSunYearPhase: number;
     targetSunYearPhase: number;
   } | null = null;
+  private readonly TWO_PI = Math.PI * 2;
   private readonly DAYS_PER_SOLAR_YEAR = 365.2422;
   private readonly AXIAL_TILT_RAD = THREE.MathUtils.degToRad(23.44);
   private readonly SUN_LIGHT_DISTANCE = 650;
@@ -174,7 +178,14 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
   /**
    * Public API: Rotate Earth to show specific coordinates
    */
-  public rotateTo(longitude: number, latitude: number, durationMs = 2000, elapsedYears = 0): void {
+  public rotateTo(
+    longitude: number,
+    latitude: number,
+    durationMs = 2000,
+    elapsedYears = 0,
+    targetYearFraction?: number,
+    targetLocalTimeHours?: number
+  ): void {
     if (!this.earthGroup) return;
 
     // Spherical coordinates: latitude (phi), longitude (theta)
@@ -195,7 +206,21 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
       targetRotation: { x: targetX, y: targetY },
     };
 
-    this.startTimeTransition(elapsedYears, durationMs);
+    if (targetYearFraction != null && Number.isFinite(targetYearFraction)) {
+      this.startTimeTransition(
+        targetYearFraction,
+        elapsedYears,
+        durationMs,
+        this.sunOrbitPhaseForLocalTime(longitude, targetLocalTimeHours)
+      );
+    } else {
+      this.startTimeTransition(
+        this.currentCelestialYearFraction + elapsedYears,
+        elapsedYears,
+        durationMs,
+        this.sunOrbitPhaseForLocalTime(longitude, targetLocalTimeHours)
+      );
+    }
 
     // Update marker position
     this.currentMarkerPosition = { lat: latitude, lon: longitude };
@@ -214,7 +239,18 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
    * Public API: Update simulated day-cycle speed
    */
   public setEarthRotationsPerSecond(rps: number): void {
-    this.earthRotationsPerSecond = THREE.MathUtils.clamp(rps, 0, 60);
+    const nextRps = THREE.MathUtils.clamp(rps, 0, 60);
+    this.earthRotationsPerSecond = nextRps;
+    if (this.earthRotationsPerSecond === 0) {
+      this.timeAnimation = null;
+    }
+  }
+
+  public setCelestialYearFraction(yearFraction: number): void {
+    if (!Number.isFinite(yearFraction)) return;
+    this.timeAnimation = null;
+    this.setCelestialPhasesFromYearFraction(yearFraction);
+    this.applySunOrbit();
   }
 
   private initScene(): void {
@@ -260,7 +296,7 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     this.sunLight.castShadow = true;
     this.scene.add(this.sunLight);
     this.createSunSprite();
-    this.updateSunOrbit(0);
+    this.applySunOrbit();
   }
 
   private loadStarfield(): void {
@@ -506,34 +542,88 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     this.scene.add(this.sunSprite);
   }
 
-  private startTimeTransition(elapsedYears: number, durationMs: number): void {
+  private startTimeTransition(
+    targetYearFraction: number,
+    elapsedYears: number,
+    durationMs: number,
+    targetSunOrbitPhaseOverride?: number
+  ): void {
     if (!Number.isFinite(elapsedYears) || Math.abs(elapsedYears) < 1e-7) {
       this.timeAnimation = null;
+      this.setCelestialPhasesFromYearFraction(targetYearFraction);
+      if (targetSunOrbitPhaseOverride != null) {
+        this.sunOrbitPhase = targetSunOrbitPhaseOverride;
+      }
+      this.applySunOrbit();
       return;
     }
 
-    const elapsedDays = elapsedYears * this.DAYS_PER_SOLAR_YEAR;
-    const sunOrbitDelta = elapsedDays * Math.PI * 2;
-    const sunYearDelta = elapsedYears * Math.PI * 2;
+    const targetPhases = this.phasesForYearFraction(targetYearFraction);
+    const targetSunOrbitPhase = targetSunOrbitPhaseOverride ?? targetPhases.sunOrbitPhase;
+    const sunOrbitDelta = elapsedYears * this.DAYS_PER_SOLAR_YEAR * this.TWO_PI;
+    const sunYearDelta = elapsedYears * this.TWO_PI;
 
     this.timeAnimation = {
       active: true,
       startTime: performance.now(),
       duration: durationMs,
+      startCelestialYearFraction: this.currentCelestialYearFraction,
+      targetCelestialYearFraction: targetYearFraction,
       startSunOrbitPhase: this.sunOrbitPhase,
-      targetSunOrbitPhase: this.sunOrbitPhase + sunOrbitDelta,
+      targetSunOrbitPhase: this.unwrapPhaseNear(
+        targetSunOrbitPhase,
+        this.sunOrbitPhase + sunOrbitDelta
+      ),
       startSunYearPhase: this.sunYearPhase,
-      targetSunYearPhase: this.sunYearPhase + sunYearDelta,
+      targetSunYearPhase: this.unwrapPhaseNear(
+        targetPhases.sunYearPhase,
+        this.sunYearPhase + sunYearDelta
+      ),
     };
+  }
+
+  private sunOrbitPhaseForLocalTime(longitude: number, localTimeHours?: number): number | undefined {
+    if (localTimeHours == null || !Number.isFinite(localTimeHours)) return undefined;
+
+    const normalizedHours = THREE.MathUtils.euclideanModulo(localTimeHours, 24);
+    const hoursFromNoon = normalizedHours - 12;
+    return THREE.MathUtils.degToRad(longitude + 90) + (hoursFromNoon / 24) * this.TWO_PI;
+  }
+
+  private phasesForYearFraction(yearFraction: number): {
+    sunOrbitPhase: number;
+    sunYearPhase: number;
+  } {
+    const yearProgress = THREE.MathUtils.euclideanModulo(yearFraction, 1);
+    const dayProgress = THREE.MathUtils.euclideanModulo(
+      yearFraction * this.DAYS_PER_SOLAR_YEAR,
+      1
+    );
+
+    return {
+      sunOrbitPhase: dayProgress * this.TWO_PI,
+      sunYearPhase: yearProgress * this.TWO_PI,
+    };
+  }
+
+  private setCelestialPhasesFromYearFraction(yearFraction: number): void {
+    const phases = this.phasesForYearFraction(yearFraction);
+    this.currentCelestialYearFraction = yearFraction;
+    this.sunOrbitPhase = phases.sunOrbitPhase;
+    this.sunYearPhase = phases.sunYearPhase;
+  }
+
+  private unwrapPhaseNear(phase: number, near: number): number {
+    return phase + Math.round((near - phase) / this.TWO_PI) * this.TWO_PI;
   }
 
   private updateSunOrbit(deltaSeconds: number): void {
     if (!this.sunLight) return;
+    if (this.earthRotationsPerSecond === 0) return;
 
-    const omega = Math.PI * 2 * this.earthRotationsPerSecond;
-    this.sunOrbitPhase = (this.sunOrbitPhase + omega * deltaSeconds) % (Math.PI * 2);
-    this.sunYearPhase =
-      (this.sunYearPhase + (omega / this.DAYS_PER_SOLAR_YEAR) * deltaSeconds) % (Math.PI * 2);
+    this.currentCelestialYearFraction +=
+      (this.earthRotationsPerSecond / this.DAYS_PER_SOLAR_YEAR) * deltaSeconds;
+    this.setCelestialPhasesFromYearFraction(this.currentCelestialYearFraction);
 
     this.applySunOrbit();
   }
@@ -549,10 +639,12 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
       anim.startSunOrbitPhase + (anim.targetSunOrbitPhase - anim.startSunOrbitPhase) * eased;
     this.sunYearPhase =
       anim.startSunYearPhase + (anim.targetSunYearPhase - anim.startSunYearPhase) * eased;
+    this.currentCelestialYearFraction =
+      anim.startCelestialYearFraction +
+      (anim.targetCelestialYearFraction - anim.startCelestialYearFraction) * eased;
 
     if (t >= 1) {
-      this.sunOrbitPhase = THREE.MathUtils.euclideanModulo(this.sunOrbitPhase, Math.PI * 2);
-      this.sunYearPhase = THREE.MathUtils.euclideanModulo(this.sunYearPhase, Math.PI * 2);
+      this.setCelestialPhasesFromYearFraction(anim.targetCelestialYearFraction);
       anim.active = false;
     }
 
@@ -614,6 +706,7 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     }
 
     // Earth rotation animation
+    let earthRotatedThisFrame = false;
     if (this.rotationAnimation?.active) {
       const anim = this.rotationAnimation;
       const elapsed = now - anim.startTime;
@@ -623,9 +716,14 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
         anim.startRotation.x + (anim.targetRotation.x - anim.startRotation.x) * eased;
       this.earthGroup.rotation.y =
         anim.startRotation.y + (anim.targetRotation.y - anim.startRotation.y) * eased;
+      earthRotatedThisFrame = true;
       if (t >= 1) {
         anim.active = false;
       }
+    }
+
+    if (earthRotatedThisFrame) {
+      this.applySunOrbit();
     }
 
     // Update marker position

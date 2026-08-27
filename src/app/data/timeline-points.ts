@@ -16,6 +16,7 @@ export interface TimelineSource {
 export interface TimelinePoint {
   description: string;
   location?: TimelinePointLocation;
+  localTimeHours?: number;
   sources?: TimelineSource[];
 }
 
@@ -23,6 +24,7 @@ export const TIMELINE_POINTS: Record<string, TimelinePoint> = {
   '609 B.C.E.': {
     description: 'Battle of Megiddo: Pharaoh Necho II of Egypt defeats King Josiah of Judah.',
     location: { lat: 32.35, lon: 35.11, name: 'Megiddo, Judah (Israel)' },
+    localTimeHours: 12,
     sources: [
       {
         type: 'youtube',
@@ -42,6 +44,7 @@ export const TIMELINE_POINTS: Record<string, TimelinePoint> = {
   '600 B.C.E.': {
     description: 'The oldest known map was created around this time.',
     location: { lat: 33.0332, lon: 44.1508, name: 'Sippar, Baghdad vilayet (Iraq)' },
+    localTimeHours: 12,
     sources: [
       {
         type: 'youtube',
@@ -67,6 +70,7 @@ export const TIMELINE_POINTS: Record<string, TimelinePoint> = {
     description:
       'Approximate global context marker: Chavin de Huantar was an active ceremonial and pilgrimage center in the Andean highlands.',
     location: { lat: -9.5938, lon: -77.1772, name: 'Chavin de Huantar, Peru' },
+    localTimeHours: 12,
     sources: [
       {
         type: 'link',
@@ -86,6 +90,7 @@ export const TIMELINE_POINTS: Record<string, TimelinePoint> = {
     description:
       'Approximate global context marker: La Venta remained a major Olmec ceremonial center in Mesoamerica.',
     location: { lat: 18.103, lon: -94.041, name: 'La Venta, Tabasco, Mexico' },
+    localTimeHours: 12,
     sources: [
       {
         type: 'link',
@@ -105,6 +110,7 @@ export const TIMELINE_POINTS: Record<string, TimelinePoint> = {
     description:
       'Approximate global context marker: Paracas communities were developing along the south coast of Peru.',
     location: { lat: -13.8667, lon: -76.2667, name: 'Paracas Peninsula, Peru' },
+    localTimeHours: 12,
     sources: [
       {
         type: 'link',
@@ -118,6 +124,7 @@ export const TIMELINE_POINTS: Record<string, TimelinePoint> = {
     description:
       'Approximate global context marker: Chavin artistic and religious influence was spreading through coastal and highland Peru.',
     location: { lat: -12.0464, lon: -77.0428, name: 'Central coast of Peru' },
+    localTimeHours: 12,
     sources: [
       {
         type: 'link',
@@ -130,6 +137,7 @@ export const TIMELINE_POINTS: Record<string, TimelinePoint> = {
   'c. 7 B.C.E.': {
     description: 'Announcement of Birth of John at the Temple (Luke 1:5-25).',
     location: { lat: 31.464, lon: 35.1408, name: 'Jerusalem' },
+    localTimeHours: 12,
     sources: [
       {
         type: 'bible',
@@ -143,6 +151,7 @@ export const TIMELINE_POINTS: Record<string, TimelinePoint> = {
     description:
       'Announcement of Birth of Jesus to Mary while in Nazareth (Luke 1:26-38). Foretold in Isaiah 7:14.',
     location: { lat: 32.4207, lon: 35.1812, name: 'Nazareth' },
+    localTimeHours: 12,
     sources: [
       {
         type: 'bible',
@@ -156,6 +165,7 @@ export const TIMELINE_POINTS: Record<string, TimelinePoint> = {
     description:
       "Jesus heals a paralytic (Luke 5:17-26, John 5:1-15). Foretold in Isaiah 35:5-6. Rediscovered during the repairs in 1888 near St. Anne's Church in Jerusalem.",
     location: { lat: 31.4653, lon: 35.1409, name: 'Old City of Jerusalem' },
+    localTimeHours: 12,
     sources: [
       {
         type: 'youtube',
@@ -180,6 +190,7 @@ export const TIMELINE_POINTS: Record<string, TimelinePoint> = {
   '1 B.C.E.': {
     description: 'A very important event happened this year.',
     location: { lat: 31.7683, lon: 35.2137, name: 'Jerusalem' },
+    localTimeHours: 12,
     sources: [
       {
         type: 'link',
@@ -192,6 +203,7 @@ export const TIMELINE_POINTS: Record<string, TimelinePoint> = {
   '1 C.E.': {
     description: 'This was the beginning of the Common Era.',
     location: { lat: 31.7683, lon: 35.2137, name: 'Jerusalem' },
+    localTimeHours: 12,
   },
   '10 C.E.': {
     description: 'Did you know? Something interesting happened in 10 C.E.',

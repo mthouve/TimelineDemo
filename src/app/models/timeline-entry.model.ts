@@ -7,6 +7,7 @@ export interface TimelineEntry {
   yearOnly: boolean;
   drawYf: number;
   isPrimary: boolean;
+  localTimeHours?: number;
   location?: TimelinePointLocation;
   sources?: TimelineSource[];
 }

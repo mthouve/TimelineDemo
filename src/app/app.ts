@@ -126,7 +126,9 @@ export class App implements AfterViewInit, OnDestroy {
             closestPrimaryWithLocation.location.lon,
             closestPrimaryWithLocation.location.lat,
             durationMs,
-            elapsedYears,
+            this.timeProgressionMultiplier ? elapsedYears : 0,
+            closestPrimaryWithLocation.yf,
+            closestPrimaryWithLocation.localTimeHours,
           );
         }
       }
@@ -157,11 +159,14 @@ export class App implements AfterViewInit, OnDestroy {
     const spanYears = Math.abs(elapsedYears);
     if (!spanYears) return this.SPACE_SCENE_MIN_TRANSITION_MS;
 
-    return this.clamp(
+    const speedAdjustedDuration = this.clamp(
       this.SPACE_SCENE_MIN_TRANSITION_MS + Math.log1p(spanYears) * 1200,
       this.SPACE_SCENE_MIN_TRANSITION_MS,
       this.SPACE_SCENE_MAX_TRANSITION_MS,
     );
+    return this.timeProgressionMultiplier
+      ? speedAdjustedDuration / this.timeProgressionMultiplier
+      : this.SPACE_SCENE_MIN_TRANSITION_MS;
   }
 
   private scheduleInfoBoxUpdate() {
@@ -191,6 +196,14 @@ export class App implements AfterViewInit, OnDestroy {
   zoomLevels: ZoomSpec[] = [];
   zoomLabels: string[] = [];
   currentZoomIdx = 3; // Year
+  timeProgressionOptions = [
+    { label: 'Off', multiplier: 0 },
+    { label: '0.5x', multiplier: 0.5 },
+    { label: '1x', multiplier: 1 },
+    { label: '2x', multiplier: 2 },
+    { label: '4x', multiplier: 4 },
+  ];
+  timeProgressionMultiplier = 0;
 
   // Timing targets
   private readonly DUR_SINGLE_STEP_MS = 4000; // ~4s for 1-step jumps
@@ -220,6 +233,9 @@ export class App implements AfterViewInit, OnDestroy {
   private infoBoxRafId: number | null = null;
   private activeSpaceSceneEntryKey: string | null = null;
   private activeSpaceSceneEntryYear: number | null = null;
+  private timeProgressionRafId: number | null = null;
+  private lastTimeProgressionMs: number | null = null;
+  private readonly TIME_PROGRESSION_DAY_SECONDS = 15;
   private readonly SPACE_SCENE_MIN_TRANSITION_MS = 2200;
   private readonly SPACE_SCENE_MAX_TRANSITION_MS = 9000;
 
@@ -316,10 +332,7 @@ export class App implements AfterViewInit, OnDestroy {
     this.buildHudLayers();
 
     // Space scene component handles its own initialization
-    // Set simulated sun day-cycle speed after component is ready
-    if (this.spaceScene) {
-      this.spaceScene.setEarthRotationsPerSecond(1 / 15);
-    }
+    this.updateSpaceSceneTimeSpeed();
 
     this.sizeAll();
 
@@ -334,6 +347,7 @@ export class App implements AfterViewInit, OnDestroy {
     this.updateScrollBounds();
     this.ensureScrollRoomFromBounds();
     this.clampScroll();
+    this.updateSpaceSceneTimeSpeed(true);
 
     this.lastScrollY = window.scrollY || window.pageYOffset || 0;
 
@@ -371,6 +385,7 @@ export class App implements AfterViewInit, OnDestroy {
     }
     if (this.earthResizeTimer) clearTimeout(this.earthResizeTimer);
     if (this.infoBoxRafId !== null) cancelAnimationFrame(this.infoBoxRafId);
+    this.stopTimelineTimeProgression();
     window.removeEventListener('keydown', this.onKeyDown as any);
     if (this.resizeDoneTimer) clearTimeout(this.resizeDoneTimer);
     if (this.wheelHandler) window.removeEventListener('wheel', this.wheelHandler as any);
@@ -416,6 +431,18 @@ export class App implements AfterViewInit, OnDestroy {
     const target = this.pendingZoomIdx ?? idx;
     this.pendingZoomIdx = null;
     this.setZoomIndex(target);
+  }
+
+  onTimeProgressionChange(event: Event) {
+    const select = event.target as HTMLSelectElement | null;
+    const nextMultiplier = Number(select?.value ?? 1);
+    this.timeProgressionMultiplier = Number.isFinite(nextMultiplier) ? nextMultiplier : 1;
+    this.updateSpaceSceneTimeSpeed(false);
+    if (this.timeProgressionMultiplier) {
+      this.startTimelineTimeProgression();
+    } else {
+      this.stopTimelineTimeProgression();
+    }
   }
 
   private onKeyDown = (e: KeyboardEvent) => {
@@ -627,6 +654,64 @@ export class App implements AfterViewInit, OnDestroy {
   private nowYearFraction() {
     return this.dateService.nowYearFraction();
   }
+
+  updateSpaceSceneTimeSpeed(anchorToTimeline = false) {
+    if (!this.spaceScene) return;
+    if (anchorToTimeline) {
+      const centeredYear = this.currentTimelineYearFraction();
+      if (centeredYear != null) {
+        this.spaceScene.setCelestialYearFraction(centeredYear);
+      }
+    }
+    this.spaceScene.setEarthRotationsPerSecond(0);
+  }
+
+  private currentTimelineYearFraction(): number | null {
+    if (this.centerYF != null && Number.isFinite(this.centerYF)) return this.centerYF;
+    if (!this.CH || !this.TL.unitYears || !this.GRID.spacingCSS) return null;
+    return this.yToYearDev(this.CH / 2);
+  }
+
+  private startTimelineTimeProgression() {
+    if (this.timeProgressionRafId !== null) return;
+    this.lastTimeProgressionMs = performance.now();
+    this.timeProgressionRafId = requestAnimationFrame(this.timelineTimeProgressionTick);
+  }
+
+  private stopTimelineTimeProgression() {
+    if (this.timeProgressionRafId !== null) {
+      cancelAnimationFrame(this.timeProgressionRafId);
+      this.timeProgressionRafId = null;
+    }
+    this.lastTimeProgressionMs = null;
+  }
+
+  private timelineTimeProgressionTick = (now: number) => {
+    this.timeProgressionRafId = null;
+    const previous = this.lastTimeProgressionMs ?? now;
+    this.lastTimeProgressionMs = now;
+
+    if (!this.timeProgressionMultiplier) return;
+
+    if (!this._ZOOM_ANIM.active && !this._scrollLocked) {
+      const dtSeconds = Math.min((now - previous) / 1000, 0.1);
+      const yearsPerSecond =
+        this.timeProgressionMultiplier /
+        (this.TIME_PROGRESSION_DAY_SECONDS * this.dateService.meanYear);
+      const currentYear = this.currentTimelineYearFraction();
+
+      if (currentYear != null) {
+        const targetYear = this.clampCenterToData(currentYear + yearsPerSecond * dtSeconds);
+        this.centerYF = targetYear;
+        this.reanchorGridForCenter(targetYear);
+        this.spaceScene?.setCelestialYearFraction(targetYear);
+        this.redraw();
+        this.scheduleInfoBoxUpdate();
+      }
+    }
+
+    this.timeProgressionRafId = requestAnimationFrame(this.timelineTimeProgressionTick);
+  };
 
   // ── Grid & mapping ────────────────────────────────────────────────────────────
   private gridKStart() {
@@ -1062,6 +1147,7 @@ export class App implements AfterViewInit, OnDestroy {
     // ── Finish ──
     this.TL.unitYears = this._ZOOM_ANIM.endUnit;
     this.currentZoomIdx = this._ZOOM_ANIM.targetIdx;
+    this.updateSpaceSceneTimeSpeed(false);
 
     // Snap final slider position & restore caption to the settled level
     this._zoomStepLabel = ''; // template can show current level name

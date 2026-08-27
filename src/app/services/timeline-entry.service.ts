@@ -45,6 +45,7 @@ export class TimelineEntryService {
         yf,
         yearOnly,
         drawYf: yearOnly ? this.dateService.startOfYearInt(yf) : yf,
+        localTimeHours: point.localTimeHours,
         location: point.location,
         sources: point.sources,
         isPrimary: false,

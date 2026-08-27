@@ -34,6 +34,26 @@ app-bible-viewer {
   z-index: 30 !important; /* above timeline and HUD lines */
 }
 
+.time-speed-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+  color: rgba(255, 170, 80, 0.95);
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell;
+  font-size: 13px;
+}
+
+.time-speed-control select {
+  flex: 0 0 88px;
+  color: rgba(255, 190, 110, 0.98);
+  background: #000;
+  border: 1px solid rgba(255, 150, 60, 0.5);
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+
 @media (max-width: 900px) {
   :host {
     --timeline-rail-left: 0;

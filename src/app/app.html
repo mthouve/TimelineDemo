@@ -5,7 +5,7 @@
   <!-- Timeline panel (right) -->
   <div class="timeline-panel">
     <!-- Space scene (Earth + starfield 3D) -->
-    <app-space-scene />
+    <app-space-scene (sceneReady)="updateSpaceSceneTimeSpeed(true)" />
 
     <!-- Centerline + timeline on top -->
     <canvas #centerline id="centerline" class="layer"></canvas>
@@ -28,6 +28,14 @@
         (inputValue)="onZoomInput($event)"
         (valueChange)="onZoomChange($event)"
       />
+      <label class="time-speed-control">
+        <span>Time:</span>
+        <select [value]="timeProgressionMultiplier" (change)="onTimeProgressionChange($event)">
+          <option *ngFor="let option of timeProgressionOptions" [value]="option.multiplier">
+            {{ option.label }}
+          </option>
+        </select>
+      </label>
     </app-settings-control>
 
     <!-- Timeline info box -->
