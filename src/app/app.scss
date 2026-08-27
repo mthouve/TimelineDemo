@@ -1,4 +1,9 @@
 /* Split view layout for Bible + Timeline */
+:host {
+  display: contents;
+  --timeline-rail-left: calc(100vw - 320px);
+}
+
 .split-view {
   display: flex;
   min-height: 100vh;
@@ -26,10 +31,14 @@ app-bible-viewer {
   bottom: auto !important;
   right: 16px !important; /* top-right within timeline window */
   top: 16px !important;
-  z-index: 20 !important; /* above HUD lines */
+  z-index: 30 !important; /* above timeline and HUD lines */
 }
 
 @media (max-width: 900px) {
+  :host {
+    --timeline-rail-left: 0;
+  }
+
   .timeline-settings .settingsUI {
     left: auto !important;
     bottom: auto !important;
@@ -63,7 +72,7 @@ app-bible-viewer {
   position: fixed;
   top: 0;
   bottom: 0;
-  left: 20vw; /* align with sidebar */
+  left: var(--timeline-rail-left);
   right: 0;
   pointer-events: none;
 }
@@ -81,21 +90,18 @@ app-bible-viewer {
   position: fixed;
   top: 0;
   bottom: 0;
-  left: 20vw; /* align with sidebar */
+  left: var(--timeline-rail-left);
   right: 0;
   pointer-events: none;
 }
 
 @media (max-width: 900px) {
   .timeline-panel #centerline,
-  .timeline-panel #timeline {
+  .timeline-panel #timeline,
+  .timeline-panel .hud {
     left: 0;
     right: 0;
   }
-}
-
-:host {
-  display: contents;
 }
 
 .hud {

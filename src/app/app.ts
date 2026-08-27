@@ -524,13 +524,17 @@ export class App implements AfterViewInit, OnDestroy {
   }
   private viewportW() {
     const vv = (window as any).visualViewport;
-    if (vv?.width) return vv.width;
-    return window.innerWidth;
+    const width = vv?.width || window.innerWidth;
+    return Math.max(1, width - this.timelineRailLeftCSS(width));
   }
   private viewportH() {
     const vv = (window as any).visualViewport;
     if (vv?.height) return vv.height;
     return window.innerHeight;
+  }
+
+  private timelineRailLeftCSS(viewportWidth: number = window.innerWidth) {
+    return viewportWidth <= 900 ? 0 : Math.max(0, viewportWidth - 320);
   }
   private sizeAll() {
     this.applySize(this.viewportW(), this.viewportH());

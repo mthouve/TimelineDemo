@@ -51,7 +51,8 @@ import { CommonModule } from '@angular/common';
   styles: [
     `
       :host {
-        display: contents;
+        display: block;
+        width: 100%;
         --trackH: 6px; /* bar height */
         --thumb: 16px; /* thumb diameter */
         --sliderH: 36px; /* input slider hit area height */
@@ -68,17 +69,19 @@ import { CommonModule } from '@angular/common';
         position: static;
         z-index: auto;
         pointer-events: auto;
+        width: 100%;
       }
       .zoomLabel {
         color: rgba(255, 170, 80, 0.95);
         font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell;
         font-size: 13px;
         margin-bottom: 6px;
+        text-align: center;
       }
 
       .sliderWrap {
         position: relative;
-        width: 240px;
+        width: 100%;
         height: var(--sliderH); /* larger click area */
       }
       .inner {

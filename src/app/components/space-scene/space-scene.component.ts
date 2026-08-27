@@ -83,6 +83,12 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
   private waterDiffuseMesh!: THREE.Mesh;
   private waterSpecMesh!: THREE.Mesh;
   private cloudsMesh!: THREE.Mesh;
+  private earthTextureReady = {
+    base: false,
+    topography: false,
+    water: false,
+    clouds: false,
+  };
 
   private animationFrameId: number | null = null;
   private locationMarker: THREE.Sprite | null = null;
@@ -299,10 +305,13 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
         }
         this.waterSpecMaterial.needsUpdate = true;
       }
+      this.markEarthTextureReady('base');
     });
 
     // Add topography bump map for surface relief
-    const topoTexture = new THREE.TextureLoader().load('assets/topography_4096.jpg');
+    const topoTexture = textureLoader.load('assets/topography_4096.jpg', () => {
+      this.markEarthTextureReady('topography');
+    });
     topoTexture.wrapS = THREE.RepeatWrapping;
     topoTexture.wrapT = THREE.RepeatWrapping;
     topoTexture.needsUpdate = true;
@@ -323,7 +332,9 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     this.earthGroup.add(this.baseMesh);
 
     // Water diffuse overlay and specular only on water, very subtle
-    const waterMask = new THREE.TextureLoader().load('assets/land_water_2048.jpg');
+    const waterMask = textureLoader.load('assets/land_water_2048.jpg', () => {
+      this.markEarthTextureReady('water');
+    });
     waterMask.wrapS = THREE.RepeatWrapping;
     waterMask.wrapT = THREE.RepeatWrapping;
     waterMask.needsUpdate = true;
@@ -342,10 +353,13 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     this.waterDiffuseMaterial.polygonOffsetUnits = -1;
     this.waterDiffuseMesh = new THREE.Mesh(this.earthGeometry, this.waterDiffuseMaterial);
     this.waterDiffuseMesh.renderOrder = 10; // ensure above land
+    this.waterDiffuseMesh.visible = false;
     this.earthGroup.add(this.waterDiffuseMesh);
 
     // Clouds texture and layers
-    const cloudsTexture = new THREE.TextureLoader().load('assets/cloud_combined_2048.jpg');
+    const cloudsTexture = textureLoader.load('assets/cloud_combined_2048.jpg', () => {
+      this.markEarthTextureReady('clouds');
+    });
     cloudsTexture.wrapS = THREE.RepeatWrapping;
     cloudsTexture.wrapT = THREE.RepeatWrapping;
     cloudsTexture.needsUpdate = true;
@@ -408,8 +422,22 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     this.atmosphereMesh = new THREE.Mesh(this.earthGeometry, this.atmosphereMaterial);
     this.atmosphereMesh.scale.setScalar(1.05);
     this.atmosphereMesh.renderOrder = 30;
+    this.atmosphereMesh.visible = false;
     this.earthGroup.add(this.atmosphereMesh);
     this.scene.add(this.earthGroup);
+  }
+
+  private markEarthTextureReady(texture: keyof typeof this.earthTextureReady): void {
+    this.earthTextureReady[texture] = true;
+    if (
+      this.earthTextureReady.base &&
+      this.earthTextureReady.topography &&
+      this.earthTextureReady.water &&
+      this.earthTextureReady.clouds
+    ) {
+      if (this.waterDiffuseMesh) this.waterDiffuseMesh.visible = true;
+      if (this.atmosphereMesh) this.atmosphereMesh.visible = true;
+    }
   }
 
   // Update the viewVector uniform for the atmosphere each frame

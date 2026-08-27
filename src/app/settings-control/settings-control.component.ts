@@ -10,8 +10,10 @@ import { faGear } from '@fortawesome/free-solid-svg-icons';
   template: `
     <div class="settingsUI" [class.minimized]="minimized">
       <ng-container *ngIf="!minimized; else minimizedIcon">
-        <ng-content></ng-content>
         <button class="minimizeBtn" (click)="minimize()" title="Minimize">&minus;</button>
+        <div class="settingsContent">
+          <ng-content></ng-content>
+        </div>
       </ng-container>
       <ng-template #minimizedIcon>
         <button class="gearBtn" (click)="restore()" title="Show Settings">
@@ -28,16 +30,20 @@ import { faGear } from '@fortawesome/free-solid-svg-icons';
         bottom: 12px;
         z-index: 10;
         padding: 10px 14px;
-        background: rgba(0, 0, 0, 0.35);
+        background: #000;
         border: 1px solid rgba(255, 150, 60, 0.55);
-        border-radius: 10px;
-        min-width: 260px;
-        min-height: 48px;
+        border-radius: 8px;
+        width: 260px;
+        min-height: 76px;
         transition: box-shadow 0.2s;
         box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
-        display: flex;
-        align-items: center;
-        gap: 12px;
+        display: block;
+      }
+      .settingsContent {
+        padding-top: 18px;
+      }
+      .settingsContent ::ng-deep app-zoom-control {
+        width: 100%;
       }
       /* When component is wrapped with a parent that has the class 'timeline-settings' (added in app.html),
       move it to the top-right of the viewport so it is outside the Bible viewer overlay. */
@@ -56,15 +62,16 @@ import { faGear } from '@fortawesome/free-solid-svg-icons';
       }
       .settingsUI.minimized {
         padding: 0;
-        min-width: 0;
+        width: auto;
         min-height: 0;
         background: none;
         border: none;
         box-shadow: none;
-        align-items: flex-end;
       }
       .minimizeBtn {
-        margin-left: auto;
+        position: absolute;
+        top: 2px;
+        right: 4px;
         background: none;
         border: none;
         color: orange;

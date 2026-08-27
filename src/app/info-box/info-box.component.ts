@@ -136,16 +136,18 @@ export interface InfoBoxEntry {
       }
       .info-box {
         position: fixed;
-        right: 16px;
-        top: 50%;
-        transform: translateY(-50%);
-        max-width: 360px;
-        background: rgba(20, 12, 6, 0.6);
+        left: 50%;
+        top: 16px;
+        transform: translateX(-50%);
+        width: min(720px, 52vw);
+        max-height: 33vh;
+        overflow-y: auto;
+        background: #000;
         border: 1px solid rgba(255, 150, 60, 0.5);
         box-shadow: 0 0 12px rgba(255, 150, 60, 0.25);
-        border-radius: 10px;
+        border-radius: 8px;
         padding: 10px 12px;
-        z-index: 5;
+        z-index: 25;
         color: rgba(255, 230, 200, 0.95);
         transition: opacity 220ms ease, visibility 220ms ease;
         opacity: 1;
@@ -183,6 +185,13 @@ export interface InfoBoxEntry {
       }
       .info-box .entry.secondary .desc {
         color: rgba(255, 200, 150, 0.6);
+      }
+      @media (max-width: 900px) {
+        .info-box {
+          top: 8px;
+          width: calc(100vw - 32px);
+          max-height: 28vh;
+        }
       }
     `,
   ],
