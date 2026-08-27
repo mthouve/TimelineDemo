@@ -92,12 +92,21 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
   private readonly SUN_LIGHT_DISTANCE = 650;
   private readonly SUN_VISUAL_ORBIT_RADIUS = 3.8;
   private readonly SUN_CAMERA_HIDE_PAD = 0.2;
+  private readonly LUNAR_MONTH_DAYS = 29.530588;
+  private readonly MOON_ORBIT_RADIUS = 1.45;
+  private readonly MOON_RADIUS = 0.075;
+  private readonly MOON_ORBIT_INCLINATION_RAD = THREE.MathUtils.degToRad(5.14);
   private readonly STAR_ANNUAL_AXIS = new THREE.Vector3(0, 1, 0);
   private readonly localSunDirection = new THREE.Vector3();
   private readonly worldSunDirection = new THREE.Vector3();
+  private readonly localMoonDirection = new THREE.Vector3();
+  private readonly worldMoonDirection = new THREE.Vector3();
   private readonly visualSunPosition = new THREE.Vector3();
   private readonly annualStarRotation = new THREE.Quaternion();
   private earthGeometry!: THREE.SphereGeometry;
+  private moonGeometry!: THREE.SphereGeometry;
+  private moonTexture: THREE.Texture | null = null;
+  private moonMaterial!: THREE.MeshPhongMaterial;
   private baseMaterial!: THREE.MeshPhongMaterial;
   private waterDiffuseMaterial!: THREE.MeshPhongMaterial;
   private waterSpecMaterial!: THREE.ShaderMaterial;
@@ -109,6 +118,7 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
   private waterDiffuseMesh!: THREE.Mesh;
   private waterSpecMesh!: THREE.Mesh;
   private cloudsMesh!: THREE.Mesh;
+  private moonMesh: THREE.Mesh | null = null;
   private earthTextureReady = {
     base: false,
     topography: false,
@@ -169,10 +179,13 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     this.waterSpecMaterial?.dispose();
     this.cloudsMaterial?.dispose();
     this.sunSpriteMaterial?.dispose();
+    this.moonGeometry?.dispose();
+    this.moonMaterial?.dispose();
 
     // Dispose textures
     this.starTexture?.dispose();
     this.sunTexture?.dispose();
+    this.moonTexture?.dispose();
   }
 
   /**
@@ -280,6 +293,7 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     this.setupLighting();
     this.loadStarfield();
     this.createEarth();
+    this.createMoon();
     this.createMarker();
   }
 
@@ -504,6 +518,26 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     }
   }
 
+  private createMoon(): void {
+    this.moonGeometry = new THREE.SphereGeometry(this.MOON_RADIUS, 24, 12);
+    this.moonTexture = new THREE.TextureLoader().load('assets/moon_1k.jpg', (texture) => {
+      if ('colorSpace' in texture) {
+        (texture as any).colorSpace = THREE.SRGBColorSpace;
+      }
+      texture.needsUpdate = true;
+    });
+    this.moonMaterial = new THREE.MeshPhongMaterial({
+      map: this.moonTexture,
+      color: 0xa8a8a8,
+      shininess: 4,
+    });
+
+    this.moonMesh = new THREE.Mesh(this.moonGeometry, this.moonMaterial);
+    this.moonMesh.renderOrder = 15;
+    this.scene.add(this.moonMesh);
+    this.applyMoonOrbit();
+  }
+
   private createSunSprite(): void {
     const size = 256;
     const canvas = document.createElement('canvas');
@@ -676,6 +710,8 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
       }
     }
 
+    this.applyMoonOrbit();
+
     if (!this.sunSprite) return;
 
     const visualPosition = this.visualSunPosition
@@ -690,6 +726,30 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
 
     // When the sun reaches the viewer side, it passes behind the camera and out of frame.
     this.sunSprite.visible = visualPosition.z < this.camera.position.z - this.SUN_CAMERA_HIDE_PAD;
+  }
+
+  private applyMoonOrbit(): void {
+    if (!this.moonMesh) return;
+
+    const lunarPhase = this.lunarPhaseForYearFraction(this.currentCelestialYearFraction);
+    this.localMoonDirection
+      .copy(this.localSunDirection)
+      .applyAxisAngle(this.STAR_ANNUAL_AXIS, lunarPhase);
+    this.localMoonDirection.y += Math.sin(lunarPhase) * Math.sin(this.MOON_ORBIT_INCLINATION_RAD);
+    this.localMoonDirection.normalize();
+
+    this.worldMoonDirection.copy(this.localMoonDirection);
+    if (this.earthGroup) {
+      this.worldMoonDirection.applyQuaternion(this.earthGroup.quaternion);
+    }
+
+    this.moonMesh.position.copy(this.worldMoonDirection).multiplyScalar(this.MOON_ORBIT_RADIUS);
+    this.moonMesh.visible = this.worldMoonDirection.z > -0.92;
+  }
+
+  private lunarPhaseForYearFraction(yearFraction: number): number {
+    const elapsedDays = yearFraction * this.DAYS_PER_SOLAR_YEAR;
+    return THREE.MathUtils.euclideanModulo(elapsedDays / this.LUNAR_MONTH_DAYS, 1) * this.TWO_PI;
   }
 
   // Update the viewVector uniform for the atmosphere each frame
