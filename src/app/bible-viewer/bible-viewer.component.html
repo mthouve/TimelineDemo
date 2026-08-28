@@ -19,6 +19,7 @@
 
   <div
     class="bible-content"
+    [class.supplemental-open]="activeSupplementalEntries.length"
     *ngIf="!searchQueryText || searchResults().length === 0"
     #bibleContent
     (wheel)="onWheel($event, bibleContent)"
@@ -42,6 +43,16 @@
             {{ selectedBook()?.abbreviation }} {{ selectedChapter() }}:{{ verse.verse }}
           </span>
           <span class="text" [innerHTML]="formatVerseHtml(verse.text)"></span>
+          <button
+            *ngIf="hasSupplementalForVerse(verse.verse)"
+            type="button"
+            class="supplemental-toggle"
+            [class.active]="activeSupplementalVerse === verse.verse"
+            title="Show supplemental notes"
+            (click)="toggleSupplementalForVerse(verse.verse)"
+          >
+            >
+          </button>
         </div>
         <div class="orig-text" *ngIf="showOriginals()">
           <div
@@ -57,6 +68,39 @@
       </div>
     </div>
   </div>
+
+  <section
+    class="supplemental-panel"
+    *ngIf="activeSupplementalEntries.length && (!searchQueryText || searchResults().length === 0)"
+    (wheel)="onWheel($event, supplementalPanel)"
+    #supplementalPanel
+  >
+    <div class="supplemental-panel-header">
+      <h3>{{ supplementalPanelTitle() }}</h3>
+      <button type="button" title="Hide supplemental notes" (click)="hideSupplementalPanel()">
+        &times;
+      </button>
+    </div>
+    <div class="supplemental-entry" *ngFor="let entry of activeSupplementalEntries">
+      <div class="supplemental-date">{{ entry.label }}</div>
+      <div class="supplemental-description">{{ entry.when }}</div>
+      <div class="supplemental-sources" *ngIf="entry.sources?.length">
+        <ng-container *ngFor="let source of entry.sources">
+          <a
+            *ngIf="externalSourceUrl(source) as url"
+            [href]="url"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {{ source.label }}
+          </a>
+          <span *ngIf="source.type === 'bible' && source.reference">
+            {{ source.reference }}
+          </span>
+        </ng-container>
+      </div>
+    </div>
+  </section>
 
   <div
     class="bible-search-results"

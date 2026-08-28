@@ -95,6 +95,7 @@ app-bible-viewer {
   left: var(--timeline-rail-left);
   right: 0;
   pointer-events: none;
+  will-change: transform;
 }
 
 /* Earth globe canvas - fills entire timeline panel for full starfield view */
@@ -113,6 +114,7 @@ app-bible-viewer {
   left: var(--timeline-rail-left);
   right: 0;
   pointer-events: none;
+  will-change: transform, opacity;
 }
 
 @media (max-width: 900px) {
@@ -128,7 +130,6 @@ app-bible-viewer {
   z-index: 1;
   pointer-events: none;
   transition: opacity 2.5s ease;
-  will-change: opacity;
 }
 .hud.hud-visible {
   opacity: 1 !important;

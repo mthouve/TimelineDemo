@@ -7,6 +7,7 @@ import {
   Input,
   Output,
   EventEmitter,
+  NgZone,
 } from '@angular/core';
 import * as THREE from 'three';
 
@@ -59,6 +60,8 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
   @Input() earthRotationsPerSecond = 0; // Default: time progression off
   @Output() sceneReady = new EventEmitter<void>();
 
+  constructor(private ngZone: NgZone) {}
+
   private scene!: THREE.Scene;
   private camera!: THREE.PerspectiveCamera;
   private renderer!: THREE.WebGLRenderer;
@@ -92,7 +95,13 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
   private readonly SUN_LIGHT_DISTANCE = 650;
   private readonly SUN_VISUAL_ORBIT_RADIUS = 3.8;
   private readonly SUN_CAMERA_HIDE_PAD = 0.2;
-  private readonly LUNAR_MONTH_DAYS = 29.530588;
+  private readonly LUNAR_SYNODIC_MONTH_DAYS = 29.530588853;
+  private readonly LUNAR_ANOMALISTIC_MONTH_DAYS = 27.55454988;
+  private readonly LUNAR_DRACONIC_MONTH_DAYS = 27.212220817;
+  private readonly KNOWN_NEW_MOON_DAY_NUMBER = 2451550.25972; // 2000-01-06 18:14 UTC
+  private readonly KNOWN_LUNAR_PERIGEE_DAY_NUMBER = 2451534.6698;
+  private readonly KNOWN_LUNAR_ASCENDING_NODE_DAY_NUMBER = 2451565.0;
+  private readonly LUNAR_ECCENTRICITY = 0.0549;
   private readonly MOON_ORBIT_RADIUS = 1.45;
   private readonly MOON_RADIUS = 0.075;
   private readonly MOON_ORBIT_INCLINATION_RAD = THREE.MathUtils.degToRad(5.14);
@@ -107,6 +116,11 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
   private readonly worldMoonDirection = new THREE.Vector3();
   private readonly localShadowDirection = new THREE.Vector3();
   private readonly visualSunPosition = new THREE.Vector3();
+  private readonly viewVector = new THREE.Vector3();
+  private readonly sunVector = new THREE.Vector3();
+  private readonly markerWorldPosition = new THREE.Vector3();
+  private readonly markerCameraDirection = new THREE.Vector3();
+  private readonly markerNormal = new THREE.Vector3();
   private readonly annualStarRotation = new THREE.Quaternion();
   private earthGeometry!: THREE.SphereGeometry;
   private moonGeometry!: THREE.SphereGeometry;
@@ -785,11 +799,15 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
   private applyMoonOrbit(): void {
     if (!this.moonMesh) return;
 
-    const lunarPhase = this.lunarPhaseForYearFraction(this.currentCelestialYearFraction);
+    const dayNumber = this.dayNumberFromYearFraction(this.currentCelestialYearFraction);
+    const lunarPhase = this.lunarPhaseFromDayNumber(dayNumber);
+    const lunarLatitude = this.lunarLatitudeFromDayNumber(dayNumber);
+    const lunarDistance = this.lunarDistanceFromDayNumber(dayNumber);
+
     this.localMoonDirection
       .copy(this.localSunDirection)
       .applyAxisAngle(this.STAR_ANNUAL_AXIS, lunarPhase);
-    this.localMoonDirection.y += Math.sin(lunarPhase) * Math.sin(this.MOON_ORBIT_INCLINATION_RAD);
+    this.localMoonDirection.y += Math.sin(lunarLatitude);
     this.localMoonDirection.normalize();
 
     this.worldMoonDirection.copy(this.localMoonDirection);
@@ -797,14 +815,63 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
       this.worldMoonDirection.applyQuaternion(this.earthGroup.quaternion);
     }
 
-    this.moonMesh.position.copy(this.worldMoonDirection).multiplyScalar(this.MOON_ORBIT_RADIUS);
+    this.moonMesh.position.copy(this.worldMoonDirection).multiplyScalar(lunarDistance);
     this.moonMesh.visible = this.worldMoonDirection.z > -0.92;
     this.applyEclipseShadow();
   }
 
-  private lunarPhaseForYearFraction(yearFraction: number): number {
-    const elapsedDays = yearFraction * this.DAYS_PER_SOLAR_YEAR;
-    return THREE.MathUtils.euclideanModulo(elapsedDays / this.LUNAR_MONTH_DAYS, 1) * this.TWO_PI;
+  private lunarPhaseFromDayNumber(dayNumber: number): number {
+    const elapsedDays = dayNumber - this.KNOWN_NEW_MOON_DAY_NUMBER;
+    return this.cyclePhase(elapsedDays, this.LUNAR_SYNODIC_MONTH_DAYS);
+  }
+
+  private lunarLatitudeFromDayNumber(dayNumber: number): number {
+    const elapsedDays = dayNumber - this.KNOWN_LUNAR_ASCENDING_NODE_DAY_NUMBER;
+    const draconicPhase = this.cyclePhase(elapsedDays, this.LUNAR_DRACONIC_MONTH_DAYS);
+    return Math.asin(Math.sin(this.MOON_ORBIT_INCLINATION_RAD) * Math.sin(draconicPhase));
+  }
+
+  private lunarDistanceFromDayNumber(dayNumber: number): number {
+    const elapsedDays = dayNumber - this.KNOWN_LUNAR_PERIGEE_DAY_NUMBER;
+    const meanAnomaly = this.cyclePhase(elapsedDays, this.LUNAR_ANOMALISTIC_MONTH_DAYS);
+    const distanceScale =
+      (1 - this.LUNAR_ECCENTRICITY * this.LUNAR_ECCENTRICITY) /
+      (1 + this.LUNAR_ECCENTRICITY * Math.cos(meanAnomaly));
+    return this.MOON_ORBIT_RADIUS * distanceScale;
+  }
+
+  private cyclePhase(elapsedDays: number, cycleDays: number): number {
+    return THREE.MathUtils.euclideanModulo(elapsedDays / cycleDays, 1) * this.TWO_PI;
+  }
+
+  private dayNumberFromYearFraction(yearFraction: number): number {
+    const year = Math.floor(yearFraction);
+    const yearProgress = yearFraction - year;
+    const dayOfYear = yearProgress * this.daysInGregorianYear(year);
+    return this.gregorianDayNumber(year, 1, 1) + dayOfYear;
+  }
+
+  private daysInGregorianYear(year: number): number {
+    return this.isGregorianLeapYear(year) ? 366 : 365;
+  }
+
+  private isGregorianLeapYear(year: number): boolean {
+    return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  }
+
+  private gregorianDayNumber(year: number, month: number, day: number): number {
+    const a = Math.floor((14 - month) / 12);
+    const y = year + 4800 - a;
+    const m = month + 12 * a - 3;
+    return (
+      day +
+      Math.floor((153 * m + 2) / 5) +
+      365 * y +
+      Math.floor(y / 4) -
+      Math.floor(y / 100) +
+      Math.floor(y / 400) -
+      32045
+    );
   }
 
   private applyEclipseShadow(): void {
@@ -880,11 +947,11 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     // Update shader uniforms for atmosphere
     if (this.atmosphereMaterial && this.camera) {
       // viewVector: from center of Earth to camera
-      const viewVec = this.camera.position.clone().sub(this.earthGroup.position).normalize();
-      this.atmosphereMaterial.uniforms['viewVector'].value = viewVec;
+      this.viewVector.copy(this.camera.position).sub(this.earthGroup.position).normalize();
+      this.atmosphereMaterial.uniforms['viewVector'].value = this.viewVector;
       // sunDir: from center of Earth to sun
-      const sunVec = this.sunLight.position.clone().sub(this.earthGroup.position).normalize();
-      this.atmosphereMaterial.uniforms['sunDir'].value = sunVec;
+      this.sunVector.copy(this.sunLight.position).sub(this.earthGroup.position).normalize();
+      this.atmosphereMaterial.uniforms['sunDir'].value = this.sunVector;
     }
 
     this.renderer.render(this.scene, this.camera);
@@ -949,7 +1016,7 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
   }
 
   private startAnimation(): void {
-    this.animate();
+    this.ngZone.runOutsideAngular(() => this.animate());
   }
 
   private updateMarkerPosition(): void {
@@ -973,13 +1040,13 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     // Fade marker as it rotates away from the viewer (dot with camera forward)
     if (this.camera) {
       // Convert marker position to world space
-      const markerWorldPos = this.locationMarker.getWorldPosition(new THREE.Vector3());
-      const cameraDirection = new THREE.Vector3()
-        .subVectors(this.camera.position, markerWorldPos)
+      this.locationMarker.getWorldPosition(this.markerWorldPosition);
+      this.markerCameraDirection
+        .subVectors(this.camera.position, this.markerWorldPosition)
         .normalize();
-      const markerNormal = markerWorldPos.clone().normalize();
+      this.markerNormal.copy(this.markerWorldPosition).normalize();
       // Dot product: >0 facing camera, <0 away
-      const facingCamera = markerNormal.dot(cameraDirection);
+      const facingCamera = this.markerNormal.dot(this.markerCameraDirection);
       let opacity = 1.0;
       if (facingCamera < 0.2) {
         if (facingCamera > -0.2) {

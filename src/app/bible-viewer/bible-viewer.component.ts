@@ -8,6 +8,8 @@ import {
   ElementRef,
   ViewChild,
   AfterViewInit,
+  OnChanges,
+  SimpleChanges,
 } from '@angular/core';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { CommonModule } from '@angular/common';
@@ -21,6 +23,15 @@ import {
   SearchResult,
   BibleChapter,
 } from '../models/bible.model';
+import { TimelineEntry } from '../models/timeline-entry.model';
+import { TimelineSource } from '../data/timeline-points';
+
+interface BibleSupplementalReference {
+  book: string;
+  chapter: number;
+  verse?: number;
+  endVerse?: number;
+}
 
 @Component({
   selector: 'app-bible-viewer',
@@ -29,7 +40,7 @@ import {
   styleUrls: ['./bible-viewer.component.scss'],
   imports: [CommonModule, FormsModule],
 })
-export class BibleViewerComponent implements OnInit, AfterViewInit {
+export class BibleViewerComponent implements OnInit, AfterViewInit, OnChanges {
   // Animation state for page slide
   pageSlideDirection: 'left' | 'right' | null = null;
   lastBookIndex: number | null = null;
@@ -40,6 +51,7 @@ export class BibleViewerComponent implements OnInit, AfterViewInit {
    * Optionally set this input to highlight a passage on load (e.g. { book: 'Luke', chapter: 5, verse: 17, endVerse: 26 })
    */
   @Input() initialHighlightReference?: BibleReference;
+  @Input() supplementalEntries: TimelineEntry[] = [];
   private initialHighlightTriggered = false;
   @ViewChild('bibleContent', { read: ElementRef }) bibleContentEl?: ElementRef<HTMLElement>;
   @ViewChild('searchResultsContainer', { read: ElementRef })
@@ -54,6 +66,10 @@ export class BibleViewerComponent implements OnInit, AfterViewInit {
   loading = signal<boolean>(false);
 
   showOriginals = signal<boolean>(true);
+  supplementalByVerse = new Map<number, TimelineEntry[]>();
+  activeSupplementalVerse: number | null = null;
+  activeSupplementalEntries: TimelineEntry[] = [];
+
   constructor(
     private bibleService: BibleService,
     private originals: OriginalLanguageService,
@@ -81,6 +97,12 @@ export class BibleViewerComponent implements OnInit, AfterViewInit {
     }
   }
 
+  ngOnChanges(changes: SimpleChanges) {
+    if (changes['supplementalEntries']) {
+      this.rebuildSupplementalIndex();
+    }
+  }
+
   selectBook(book: BibleBook | null) {
     const booksArr = this.books();
     const newBookIdx = book ? booksArr.findIndex((b) => b.name === book.name) : -1;
@@ -92,6 +114,7 @@ export class BibleViewerComponent implements OnInit, AfterViewInit {
     this.selectedBook.update(() => book);
     this.selectedChapter.update(() => 1);
     this.updateVerses();
+    this.hideSupplementalPanel();
     this.resetScrollToTop();
     this.lastBookIndex = newBookIdx;
     this.lastChapter = 1;
@@ -115,6 +138,7 @@ export class BibleViewerComponent implements OnInit, AfterViewInit {
     this.pageSlideDirection = direction;
     this.selectedChapter.update(() => Number(chapter));
     this.updateVerses();
+    this.hideSupplementalPanel();
     this.resetScrollToTop();
     this.lastChapter = chapter;
     this.isFirstLoad = false;
@@ -139,10 +163,12 @@ export class BibleViewerComponent implements OnInit, AfterViewInit {
     const chapterNum = this.selectedChapter();
     if (!book || !chapterNum) {
       this.verses.update(() => []);
+      this.rebuildSupplementalIndex();
       return;
     }
     const chapter = book.chapters.find((c: BibleChapter) => c.chapter === chapterNum);
     this.verses.update(() => (chapter ? chapter.verses : []));
+    this.rebuildSupplementalIndex();
   }
 
   search() {
@@ -157,6 +183,84 @@ export class BibleViewerComponent implements OnInit, AfterViewInit {
   clearSearch() {
     this.searchQueryText = '';
     this.searchResults.update(() => []);
+  }
+
+  hasSupplementalForVerse(verse: number): boolean {
+    return (this.supplementalByVerse.get(verse)?.length ?? 0) > 0;
+  }
+
+  toggleSupplementalForVerse(verse: number) {
+    if (this.activeSupplementalVerse === verse) {
+      this.hideSupplementalPanel();
+      return;
+    }
+
+    this.activeSupplementalVerse = verse;
+    this.activeSupplementalEntries = this.supplementalByVerse.get(verse) ?? [];
+  }
+
+  hideSupplementalPanel() {
+    this.activeSupplementalVerse = null;
+    this.activeSupplementalEntries = [];
+  }
+
+  supplementalPanelTitle(): string {
+    const book = this.selectedBook();
+    const chapter = this.selectedChapter();
+    if (!book || !chapter || this.activeSupplementalVerse == null) return 'Supplemental Notes';
+    return `${book.abbreviation} ${chapter}:${this.activeSupplementalVerse}`;
+  }
+
+  externalSourceUrl(source: TimelineSource): string | null {
+    if (source.type === 'link') return source.url ?? null;
+    if (source.type === 'youtube' && source.youtubeId) {
+      return `https://www.youtube.com/watch?v=${source.youtubeId}`;
+    }
+    return null;
+  }
+
+  private rebuildSupplementalIndex() {
+    this.supplementalByVerse.clear();
+
+    const book = this.selectedBook();
+    const chapter = this.selectedChapter();
+    const verses = this.verses();
+    if (!book || !chapter || !verses.length || !this.supplementalEntries.length) return;
+
+    const verseNumbers = new Set(verses.map((verse) => verse.verse));
+    for (const entry of this.supplementalEntries) {
+      const refs = entry.sources
+        ?.filter((source) => source.type === 'bible' && source.reference)
+        .map((source) => this.parseSupplementalReference(source.reference!))
+        .filter((ref): ref is BibleSupplementalReference => !!ref);
+
+      if (!refs?.length) continue;
+
+      for (const ref of refs) {
+        if (ref.book !== book.name || ref.chapter !== chapter) continue;
+
+        const start = ref.verse ?? Math.min(...verseNumbers);
+        const end = ref.endVerse ?? start;
+        for (let verse = start; verse <= end; verse++) {
+          if (!verseNumbers.has(verse)) continue;
+          const entries = this.supplementalByVerse.get(verse) ?? [];
+          if (!entries.includes(entry)) entries.push(entry);
+          this.supplementalByVerse.set(verse, entries);
+        }
+      }
+    }
+  }
+
+  private parseSupplementalReference(reference: string): BibleSupplementalReference | null {
+    const match = reference.match(/^(.*?)\s+(\d+)(?::(\d+)(?:-(\d+))?)?$/);
+    if (!match) return null;
+
+    return {
+      book: match[1],
+      chapter: Number(match[2]),
+      verse: match[3] ? Number(match[3]) : undefined,
+      endVerse: match[4] ? Number(match[4]) : undefined,
+    };
   }
 
   // Highlight state
@@ -205,6 +309,7 @@ export class BibleViewerComponent implements OnInit, AfterViewInit {
     if (changingBook || changingChapter) {
       this.selectedChapter.update(() => Number(ref.chapter));
       this.updateVerses();
+      this.hideSupplementalPanel();
       this.resetScrollToTop();
       this.lastChapter = ref.chapter;
     }

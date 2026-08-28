@@ -6,6 +6,7 @@ import {
   OnDestroy,
   HostListener,
   Renderer2,
+  NgZone,
 } from '@angular/core';
 import { TimelineDateService, ZoomSpec } from './services/timeline-date.service';
 import { TimelineEntryService } from './services/timeline-entry.service';
@@ -15,7 +16,6 @@ import { TimelineZoomService, ZoomAnimationState } from './services/timeline-zoo
 import { SpaceSceneComponent } from './components/space-scene/space-scene.component';
 import { ZoomControlComponent } from './zoom-control/zoom-control.component';
 import { SettingsControlComponent } from './settings-control/settings-control.component';
-import { InfoBoxComponent, InfoBoxEntry } from './info-box/info-box.component';
 import { BibleViewerComponent } from './bible-viewer/bible-viewer.component';
 import { CommonModule } from '@angular/common';
 import { TimelineEntry } from './models/timeline-entry.model';
@@ -28,7 +28,6 @@ import { TimelineEntry } from './models/timeline-entry.model';
   imports: [
     ZoomControlComponent,
     SettingsControlComponent,
-    InfoBoxComponent,
     BibleViewerComponent,
     SpaceSceneComponent,
     CommonModule,
@@ -42,6 +41,7 @@ export class App implements AfterViewInit, OnDestroy {
     private timelineRenderer: TimelineRendererService,
     private zoomService: TimelineZoomService,
     private r2: Renderer2,
+    private ngZone: NgZone,
   ) {
     // Ensure a sensible base page title for tests and initial load
     if (!document.title || document.title.trim() === '') {
@@ -51,57 +51,31 @@ export class App implements AfterViewInit, OnDestroy {
     this.zoomLabels = this.dateService.getZoomLabels();
   }
 
-  // ── Info box state ──────────────────────────────────────────────────────────
-  infoEntries: InfoBoxEntry[] = [];
-  infoBoxHidden = true;
+  // ── Bible supplemental data ─────────────────────────────────────────────────
+  bibleSupplementalEntries: TimelineEntry[] = [];
   @ViewChild(BibleViewerComponent) bibleViewer?: BibleViewerComponent;
-  // Called when a Bible link is clicked in the info box
-  onBibleLink(reference: string) {
-    if (!reference || !this.bibleViewer) return;
-    // Parse reference string (e.g., "Genesis 1:1" or "John 3:16-17")
-    const match = reference.match(/^(.*?)\s+(\d+)(?::(\d+)(?:-(\d+))?)?$/);
-    if (!match) return;
-    const book = match[1];
-    const chapter = Number(match[2]);
-    const verse = match[3] ? Number(match[3]) : undefined;
-    const endVerse = match[4] ? Number(match[4]) : undefined;
-    // Use BibleViewerComponent's goToReference
-    this.bibleViewer.goToReference({ book, chapter, verse, endVerse });
-    // Optionally, trigger highlight/scroll logic here (to be implemented in BibleViewerComponent)
-  }
 
-  private updateInfoBox() {
+  private updateTimelineTarget() {
     const allEntries = this.getEntries();
     if (!allEntries.length || !this.CH || !this.GRID.spacingCSS || !this.TL.unitYears) {
-      this.infoEntries = [];
-      this.infoBoxHidden = true;
       return;
     }
 
     const centerYF = this.centerYF ?? this.yToYearDev(this.CH / 2);
 
-    // One HUD spacing represents this.TL.unitYears (e.g., 1 year in Year view, 10 in Decade view)
-    // Primary: within ~1 HUD line spacing (in years)
-    // Secondary: within ~2 HUD line spacings (in years)
-    const primaryRange = this.TL.unitYears * 1.0; // within 1 HUD spacing
-    const secondaryRange = this.TL.unitYears * 2.0; // within 2 HUD spacings
+    // One HUD spacing represents this.TL.unitYears. The globe target follows
+    // nearby data points without driving a floating info box during animation.
+    const visibleRange = this.TL.unitYears;
 
-    const nearbyEntries: InfoBoxEntry[] = [];
-    const entries = this.getEntriesNearYear(centerYF, secondaryRange);
+    const entries = this.getEntriesNearYear(centerYF, visibleRange);
     let closestPrimaryWithLocation: (typeof entries)[0] | null = null;
     let closestDistance = Infinity;
 
     for (const e of entries) {
       const dy = Math.abs(e.yf - centerYF);
-      if (dy <= secondaryRange) {
-        const isPrimary = dy <= primaryRange;
-        nearbyEntries.push({
-          ...e,
-          isPrimary,
-        });
-
-        // Track closest primary entry with location for Earth rotation
-        if (isPrimary && e.location && dy < closestDistance) {
+      if (dy <= visibleRange) {
+        // Track closest visible entry with location for Earth rotation
+        if (e.location && dy < closestDistance) {
           closestPrimaryWithLocation = e;
           closestDistance = dy;
         }
@@ -133,8 +107,8 @@ export class App implements AfterViewInit, OnDestroy {
         }
       }
 
-      // Calculate marker opacity based on distance (fade out over 2x primary range)
-      const fadeRange = primaryRange * 2.0;
+      // Calculate marker opacity based on distance within the one-line visibility range.
+      const fadeRange = visibleRange;
       const opacity = fadeRange > 0 ? 1.0 - Math.min(closestDistance / fadeRange, 1.0) : 0;
       if (this.spaceScene) {
         this.spaceScene.setMarkerOpacity(opacity);
@@ -145,10 +119,6 @@ export class App implements AfterViewInit, OnDestroy {
         this.spaceScene.setMarkerOpacity(0);
       }
     }
-
-    // Already in chronological order, just limit total count
-    this.infoEntries = nearbyEntries.slice(0, 16);
-    this.infoBoxHidden = this.infoEntries.length === 0;
   }
 
   private spaceSceneEntryKey(entry: TimelineEntry): string {
@@ -169,18 +139,12 @@ export class App implements AfterViewInit, OnDestroy {
       : this.SPACE_SCENE_MIN_TRANSITION_MS;
   }
 
-  private scheduleInfoBoxUpdate() {
-    if (this.infoBoxRafId !== null) return;
-    this.infoBoxRafId = requestAnimationFrame(() => {
-      this.infoBoxRafId = null;
-      this.updateInfoBox();
+  private scheduleTimelineTargetUpdate() {
+    if (this.timelineTargetRafId !== null) return;
+    this.timelineTargetRafId = requestAnimationFrame(() => {
+      this.timelineTargetRafId = null;
+      this.updateTimelineTarget();
     });
-  }
-
-  private scheduleProgressionInfoBoxUpdate(now: number) {
-    if (now - this.lastProgressionInfoBoxUpdateMs < this.PROGRESSION_INFO_BOX_INTERVAL_MS) return;
-    this.lastProgressionInfoBoxUpdateMs = now;
-    this.scheduleInfoBoxUpdate();
   }
 
   private markActiveHudLayers() {
@@ -236,14 +200,16 @@ export class App implements AfterViewInit, OnDestroy {
   }> = [];
 
   // ── Data ──────────────────────────────────────────────────────────────────────
-  private infoBoxRafId: number | null = null;
-  private lastProgressionInfoBoxUpdateMs = 0;
-  private readonly PROGRESSION_INFO_BOX_INTERVAL_MS = 250;
+  private timelineTargetRafId: number | null = null;
   private activeSpaceSceneEntryKey: string | null = null;
   private activeSpaceSceneEntryYear: number | null = null;
   private timeProgressionRafId: number | null = null;
   private lastTimeProgressionMs: number | null = null;
+  private lastProgressionTimelineDrawYf: number | null = null;
+  private lastProgressionTimelineDrawMs = 0;
   private readonly TIME_PROGRESSION_DAY_SECONDS = 15;
+  private readonly PROGRESSION_TIMELINE_MIN_DRAW_PX = 24;
+  private readonly PROGRESSION_TIMELINE_MIN_DRAW_INTERVAL_MS = 180;
   private readonly SPACE_SCENE_MIN_TRANSITION_MS = 2200;
   private readonly SPACE_SCENE_MAX_TRANSITION_MS = 9000;
 
@@ -346,6 +312,9 @@ export class App implements AfterViewInit, OnDestroy {
 
     this.TL.unitYears = this.zoomLevels[this.currentZoomIdx].unit;
     const entries = this.getEntries();
+    this.bibleSupplementalEntries = entries.filter((entry) =>
+      entry.sources?.some((source) => source.type === 'bible' && source.reference)
+    );
     if (entries.length) this.TL.baseYear = entries[0].yf;
 
     this.anchorGrid();
@@ -365,7 +334,7 @@ export class App implements AfterViewInit, OnDestroy {
       h.el.classList.remove('hud-visible');
     }
     this.redraw();
-    this.scheduleInfoBoxUpdate();
+    this.scheduleTimelineTargetUpdate();
     setTimeout(() => {
       const el = this.HUDS[this.currentZoomIdx]?.el;
       if (el) {
@@ -392,7 +361,7 @@ export class App implements AfterViewInit, OnDestroy {
       this.earthResizeObserver = null;
     }
     if (this.earthResizeTimer) clearTimeout(this.earthResizeTimer);
-    if (this.infoBoxRafId !== null) cancelAnimationFrame(this.infoBoxRafId);
+    if (this.timelineTargetRafId !== null) cancelAnimationFrame(this.timelineTargetRafId);
     this.stopTimelineTimeProgression();
     window.removeEventListener('keydown', this.onKeyDown as any);
     if (this.resizeDoneTimer) clearTimeout(this.resizeDoneTimer);
@@ -561,7 +530,7 @@ export class App implements AfterViewInit, OnDestroy {
     }
 
     this.redraw();
-    this.scheduleInfoBoxUpdate();
+    this.scheduleTimelineTargetUpdate();
     this.recenterVirtualWindowIfNeeded();
   }
 
@@ -683,7 +652,11 @@ export class App implements AfterViewInit, OnDestroy {
   private startTimelineTimeProgression() {
     if (this.timeProgressionRafId !== null) return;
     this.lastTimeProgressionMs = performance.now();
-    this.timeProgressionRafId = requestAnimationFrame(this.timelineTimeProgressionTick);
+    this.lastProgressionTimelineDrawYf = this.currentTimelineYearFraction();
+    this.lastProgressionTimelineDrawMs = 0;
+    this.ngZone.runOutsideAngular(() => {
+      this.timeProgressionRafId = requestAnimationFrame(this.timelineTimeProgressionTick);
+    });
   }
 
   private stopTimelineTimeProgression() {
@@ -692,6 +665,9 @@ export class App implements AfterViewInit, OnDestroy {
       this.timeProgressionRafId = null;
     }
     this.lastTimeProgressionMs = null;
+    this.lastProgressionTimelineDrawYf = null;
+    this.lastProgressionTimelineDrawMs = 0;
+    this.clearProgressionCanvasTransform();
   }
 
   private timelineTimeProgressionTick = (now: number) => {
@@ -711,15 +687,59 @@ export class App implements AfterViewInit, OnDestroy {
       if (currentYear != null) {
         const targetYear = this.clampCenterToData(currentYear + yearsPerSecond * dtSeconds);
         this.centerYF = targetYear;
-        this.reanchorGridForCenter(targetYear);
         this.spaceScene?.setCelestialYearFraction(targetYear);
-        this.redraw();
-        this.scheduleProgressionInfoBoxUpdate(now);
+        this.applyProgressionCanvasTransform(targetYear);
+
+        if (this.shouldRedrawTimelineForProgression(targetYear, now)) {
+          this.lastProgressionTimelineDrawYf = targetYear;
+          this.lastProgressionTimelineDrawMs = now;
+          this.reanchorGridForCenter(targetYear);
+          this.redraw();
+        }
       }
     }
 
     this.timeProgressionRafId = requestAnimationFrame(this.timelineTimeProgressionTick);
   };
+
+  private shouldRedrawTimelineForProgression(targetYear: number, now: number): boolean {
+    if (this.lastProgressionTimelineDrawYf == null) return true;
+    if (!this.GRID.spacingCSS || !this.TL.unitYears || !this.DPR) return true;
+    if (
+      this.lastProgressionTimelineDrawMs &&
+      now - this.lastProgressionTimelineDrawMs < this.PROGRESSION_TIMELINE_MIN_DRAW_INTERVAL_MS
+    ) {
+      return false;
+    }
+
+    const yearsSinceLastDraw = Math.abs(targetYear - this.lastProgressionTimelineDrawYf);
+    const cssPixelsSinceLastDraw =
+      (yearsSinceLastDraw * this.GRID.spacingCSS) / this.TL.unitYears;
+    return cssPixelsSinceLastDraw >= this.PROGRESSION_TIMELINE_MIN_DRAW_PX;
+  }
+
+  private applyProgressionCanvasTransform(targetYear: number): void {
+    if (this.lastProgressionTimelineDrawYf == null || !this.GRID.spacingCSS || !this.TL.unitYears) {
+      return;
+    }
+
+    const offsetCss =
+      ((this.lastProgressionTimelineDrawYf - targetYear) * this.GRID.spacingCSS) /
+      this.TL.unitYears;
+    const transform = `translate3d(0, ${offsetCss}px, 0)`;
+
+    this.timeline.nativeElement.style.transform = transform;
+    for (const hud of this.HUDS) {
+      hud.el.style.transform = transform;
+    }
+  }
+
+  private clearProgressionCanvasTransform(): void {
+    this.timeline.nativeElement.style.transform = '';
+    for (const hud of this.HUDS) {
+      hud.el.style.transform = '';
+    }
+  }
 
   // ── Grid & mapping ────────────────────────────────────────────────────────────
   private gridKStart() {
@@ -809,6 +829,7 @@ export class App implements AfterViewInit, OnDestroy {
 
   // ── Redraw ────────────────────────────────────────────────────────────────────
   private redraw(fadeFrom = 1, fadeTo = 0) {
+    this.clearProgressionCanvasTransform();
     this.drawHuds(fadeFrom, fadeTo);
     this.drawCenterline();
     this.drawTimeline();
@@ -1183,7 +1204,7 @@ export class App implements AfterViewInit, OnDestroy {
     this.unlockScrollingHard();
 
     this.redraw();
-    this.scheduleInfoBoxUpdate();
+    this.scheduleTimelineTargetUpdate();
 
     // Restore CSS-driven visibility
     for (let j = 0; j < this.HUDS.length; j++) {

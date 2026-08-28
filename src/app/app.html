@@ -1,6 +1,6 @@
 <div class="split-view">
   <!-- Bible panel (left) -->
-  <app-bible-viewer />
+  <app-bible-viewer [supplementalEntries]="bibleSupplementalEntries" />
 
   <!-- Timeline panel (right) -->
   <div class="timeline-panel">
@@ -37,12 +37,5 @@
         </select>
       </label>
     </app-settings-control>
-
-    <!-- Timeline info box -->
-    <app-info-box
-      [entries]="infoEntries"
-      [hidden]="infoBoxHidden"
-      (openBiblePassage)="onBibleLink($event)"
-    />
   </div>
 </div>
