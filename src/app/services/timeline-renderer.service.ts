@@ -21,6 +21,8 @@ export interface DrawTimelineParams {
   entries: TimelineEntry[];
   nowYearFraction: number;
   style: TimelineStyle;
+  zoomLevelName: string;
+  formatLabelByZoomLevel: (year: number, zoomLevelName: string) => string;
   yearToY: (year: number) => number;
   yToYearDev: (yDev: number) => number;
   lowerBoundByDrawYf: (target: number) => number;
@@ -40,7 +42,10 @@ interface DrawSegmentsParams {
   yearToY: (year: number) => number;
 }
 
-interface DrawPointsParams extends DrawSegmentsParams {}
+interface DrawPointsParams extends DrawSegmentsParams {
+  zoomLevelName: string;
+  formatLabelByZoomLevel: (year: number, zoomLevelName: string) => string;
+}
 
 @Injectable({
   providedIn: 'root',
@@ -55,6 +60,8 @@ export class TimelineRendererService {
       entries,
       nowYearFraction,
       style,
+      zoomLevelName,
+      formatLabelByZoomLevel,
       yearToY,
       yToYearDev,
       lowerBoundByDrawYf,
@@ -102,6 +109,8 @@ export class TimelineRendererService {
       dpr,
       nowYearFraction,
       style,
+      zoomLevelName,
+      formatLabelByZoomLevel,
       yearToY,
     });
   }
@@ -185,6 +194,8 @@ export class TimelineRendererService {
       dpr,
       nowYearFraction,
       style,
+      zoomLevelName,
+      formatLabelByZoomLevel,
       yearToY,
     } = params;
     const r = Math.max(2, Math.round(style.pointRcss * dpr));
@@ -214,7 +225,14 @@ export class TimelineRendererService {
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
       ctx.fillStyle = 'rgba(255,235,200,0.96)';
-      ctx.fillText(point.label, x + r + Math.round(8 * dpr), y);
+      const labelX = x + r + Math.round(8 * dpr);
+      const labelMaxWidth = Math.max(24 * dpr, ctx.canvas.width - labelX - Math.round(6 * dpr));
+      ctx.fillText(
+        formatLabelByZoomLevel(point.drawYf, zoomLevelName),
+        labelX,
+        y,
+        labelMaxWidth,
+      );
       ctx.restore();
     }
   }

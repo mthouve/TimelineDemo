@@ -876,6 +876,7 @@ export class App implements AfterViewInit, OnDestroy {
       yToYearDev: this.yToYearDev.bind(this),
       nowYearFraction: this.nowYearFraction.bind(this),
       formatLabelByUnit: this.formatLabelByUnit.bind(this),
+      formatLabelByZoomLevel: this.formatLabelByZoomLevel.bind(this),
       labelFromDayOfYear: this.labelFromDayOfYear.bind(this),
       daysInYear: this.daysInYear.bind(this),
       getMonthName: this.getMonthName.bind(this),
@@ -925,6 +926,10 @@ export class App implements AfterViewInit, OnDestroy {
     return this.dateService.formatLabelByUnit(yf, unit);
   }
 
+  private formatLabelByZoomLevel(yf: number, zoomLevelName: string) {
+    return this.dateService.formatLabelByZoomLevel(yf, zoomLevelName);
+  }
+
   private drawCenterline() {
     const canvas = this.centerline.nativeElement;
     this.hudService.drawCenterline({
@@ -940,6 +945,7 @@ export class App implements AfterViewInit, OnDestroy {
       entries: this.getEntries(),
       yearToY: this.yToYearDev.bind(this),
       formatLabel: this.formatLabelByUnit.bind(this),
+      formatLabelByZoomLevel: this.formatLabelByZoomLevel.bind(this),
       snapToUnit: this.snapToUnit.bind(this),
       dateService: this.dateService,
     });
@@ -972,6 +978,8 @@ export class App implements AfterViewInit, OnDestroy {
       entries: this.getEntries(),
       nowYearFraction: this.nowYearFraction(),
       style: this.TL,
+      zoomLevelName: this.zoomLevels[this.currentZoomIdx]?.name ?? 'Year',
+      formatLabelByZoomLevel: this.formatLabelByZoomLevel.bind(this),
       yearToY: this.yearToY.bind(this),
       yToYearDev: this.yToYearDev.bind(this),
       lowerBoundByDrawYf: this.lowerBoundByDrawYf.bind(this),

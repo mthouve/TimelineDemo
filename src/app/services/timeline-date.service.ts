@@ -705,11 +705,26 @@ export class TimelineDateService {
     return Math.abs(totalDays);
   }
 
+  formatLabelByZoomLevel(yf: number, zoomLevel: string): string {
+    switch (zoomLevel) {
+      case 'Day':
+        return this.formatDayLabel(yf);
+      case 'Week':
+        return this.formatWeekLabel(yf);
+      case 'Month':
+        return this.formatMonthLabel(yf);
+      default:
+        return this.formatLabelByUnit(
+          yf,
+          this.zoomLevels.find((level) => level.name === zoomLevel)?.unit ?? 1
+        );
+    }
+  }
+
   // Reimplement the formatLabelByUnit logic here so callers can get formatted labels
   formatLabelByUnit(yf: number, unit: number): string {
-    const isBCE = yf < 0;
     const calYear = yf >= 0 ? Math.floor(yf) : Math.ceil(yf);
-    let diy = this.daysInYear(calYear);
+    const diy = this.daysInYear(calYear);
 
     // DAY tier detection
     const isDayTier =
@@ -718,102 +733,15 @@ export class TimelineDateService {
       this.isApproximatelyEqual(unit, 1 / this.MEAN_YEAR, 0.02);
 
     if (isDayTier) {
-      // Derive day within the correct astronomical year using floor decomposition (works for BCE too)
-      const yr = Math.floor(yf);
-      const diy0 = this.daysInYear(yr);
-      let dayOfYear = Math.floor((yf - yr) * diy0 + 1e-9);
-      if (dayOfYear < 0) dayOfYear = 0;
-      if (dayOfYear >= diy0) dayOfYear = diy0 - 1;
-      const md = [31, this.isLeapYear(yr) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-      const months2 = [
-        'Jan',
-        'Feb',
-        'Mar',
-        'Apr',
-        'May',
-        'Jun',
-        'Jul',
-        'Aug',
-        'Sep',
-        'Oct',
-        'Nov',
-        'Dec',
-      ];
-      let mi = 0,
-        dleft = dayOfYear;
-      while (mi < 12) {
-        if (dleft < md[mi]) break;
-        dleft -= md[mi];
-        mi++;
-      }
-      if (mi > 11) {
-        mi = 11;
-        dleft = md[11] - 1;
-      }
-      const day = dleft + 1;
-
-      // Convert astronomical year to historical year for display using yr
-      const historicalYear = this.astronomicalToHistorical(yr);
-      const absYear = Math.abs(historicalYear);
-      const tail2 = historicalYear < 0 ? ' B.C.E.' : ' C.E.';
-      // Compute weekday using proleptic Gregorian anchored to 1970-01-01 (Thursday)
-      const weekdayIdx = this.weekdayFromYMD(yr, mi, day);
-      const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-      const weekday = weekdays[weekdayIdx];
-      return `${weekday}, ${months2[mi]} ${day}, ${absYear}${tail2}`;
+      return this.formatDayLabel(yf);
     }
 
     if (this.isApproximatelyEqual(unit, 7 / this.MEAN_YEAR, 0.02)) {
-      // Anchor labels to Sunday-start week boundaries
-      const idx = this.dayIndexFromYf(yf);
-      const w = this.weekdayFromYf(yf); // 0=Sun..6=Sat
-      const deltaToStart = (w - 0 + 7) % 7;
-      const weekStartIdx = idx - deltaToStart;
-      const yfWeekStart = this.yfFromDayIndex(weekStartIdx);
-      const yr = Math.floor(yfWeekStart);
-      const diy = this.daysInYear(yr);
-      const dayOfYear = Math.floor((yfWeekStart - yr) * diy);
-      return this.labelFromDayOfYear(yr, dayOfYear);
+      return this.formatWeekLabel(yf);
     }
 
     if (Math.abs(unit - 1 / 12) < 1e-7) {
-      // Derive month index from actual day-of-year to ensure consistency in BCE
-      const yr0 = Math.floor(yf);
-      const diy0 = this.daysInYear(yr0);
-      const frac0 = yf - yr0;
-      // Add tiny epsilon so exact month-boundary yfs label the new month, not the prior one
-      let dayOfYear0 = Math.floor(frac0 * diy0 + 1e-9);
-      if (dayOfYear0 < 0) dayOfYear0 = 0; // safety
-      if (dayOfYear0 >= diy0) dayOfYear0 = diy0 - 1;
-
-      const md = [31, this.isLeapYear(yr0) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-      const months = [
-        'Jan',
-        'Feb',
-        'Mar',
-        'Apr',
-        'May',
-        'Jun',
-        'Jul',
-        'Aug',
-        'Sep',
-        'Oct',
-        'Nov',
-        'Dec',
-      ];
-      let mi = 0,
-        dleft = dayOfYear0;
-      while (mi < 12) {
-        if (dleft < md[mi]) break;
-        dleft -= md[mi];
-        mi++;
-      }
-      if (mi > 11) mi = 11;
-
-      const historicalYear = this.astronomicalToHistorical(yr0);
-      const absYear = Math.abs(historicalYear);
-      const tail = historicalYear < 0 ? ' B.C.E.' : ' C.E.';
-      return `${months[mi]} ${absYear}${tail}`;
+      return this.formatMonthLabel(yf);
     }
 
     if (unit >= 1) {
@@ -823,6 +751,66 @@ export class TimelineDateService {
       return historicalYear < 0 ? `${absYear} B.C.E.` : `${absYear} C.E.`;
     }
     return '';
+  }
+
+  private formatDayLabel(yf: number): string {
+    const { year, monthIndex, day } = this.calendarPartsFromYf(yf);
+    const historicalYear = this.astronomicalToHistorical(year);
+    const absYear = Math.abs(historicalYear);
+    const tail = historicalYear < 0 ? ' B.C.E.' : ' C.E.';
+    const weekdayIdx = this.weekdayFromYMD(year, monthIndex, day);
+    const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    return `${weekdays[weekdayIdx]}, ${this.monthShortName(monthIndex)} ${day}, ${absYear}${tail}`;
+  }
+
+  private formatWeekLabel(yf: number): string {
+    const idx = this.dayIndexFromYf(yf);
+    const w = this.weekdayFromYf(yf);
+    const weekStartIdx = idx - ((w - 0 + 7) % 7);
+    const yfWeekStart = this.yfFromDayIndex(weekStartIdx);
+    const { year, dayOfYear } = this.calendarPartsFromYf(yfWeekStart);
+    return this.labelFromDayOfYear(year, dayOfYear);
+  }
+
+  private formatMonthLabel(yf: number): string {
+    const { year, monthIndex } = this.calendarPartsFromYf(yf);
+    const historicalYear = this.astronomicalToHistorical(year);
+    const absYear = Math.abs(historicalYear);
+    const tail = historicalYear < 0 ? ' B.C.E.' : ' C.E.';
+    return `${this.monthShortName(monthIndex)} ${absYear}${tail}`;
+  }
+
+  private calendarPartsFromYf(yf: number): {
+    year: number;
+    monthIndex: number;
+    day: number;
+    dayOfYear: number;
+  } {
+    const year = Math.floor(yf);
+    const diy = this.daysInYear(year);
+    let dayOfYear = Math.floor((yf - year) * diy + 1e-9);
+    if (dayOfYear < 0) dayOfYear = 0;
+    if (dayOfYear >= diy) dayOfYear = diy - 1;
+
+    const md = [31, this.isLeapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let monthIndex = 0;
+    let dleft = dayOfYear;
+    while (monthIndex < 12 && dleft >= md[monthIndex]) {
+      dleft -= md[monthIndex];
+      monthIndex++;
+    }
+    if (monthIndex > 11) {
+      monthIndex = 11;
+      dleft = md[11] - 1;
+    }
+
+    return { year, monthIndex, day: dleft + 1, dayOfYear };
+  }
+
+  private monthShortName(monthIndex: number): string {
+    return ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][
+      monthIndex
+    ];
   }
 
   // small clamp helper for internal use

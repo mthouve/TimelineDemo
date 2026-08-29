@@ -11,6 +11,142 @@ import {
 } from '@angular/core';
 import * as THREE from 'three';
 
+type LunarLongitudeDistanceTerm = [
+  d: number,
+  m: number,
+  mp: number,
+  f: number,
+  l: number,
+  r: number,
+];
+type LunarLatitudeTerm = [d: number, m: number, mp: number, f: number, b: number];
+
+const LUNAR_LONGITUDE_DISTANCE_TERMS: LunarLongitudeDistanceTerm[] = [
+  [0, 0, 1, 0, 6288774, -20905355],
+  [2, 0, -1, 0, 1274027, -3699111],
+  [2, 0, 0, 0, 658314, -2955968],
+  [0, 0, 2, 0, 213618, -569925],
+  [0, 1, 0, 0, -185116, 48888],
+  [0, 0, 0, 2, -114332, -3149],
+  [2, 0, -2, 0, 58793, 246158],
+  [2, -1, -1, 0, 57066, -152138],
+  [2, 0, 1, 0, 53322, -170733],
+  [2, -1, 0, 0, 45758, -204586],
+  [0, 1, -1, 0, -40923, -129620],
+  [1, 0, 0, 0, -34720, 108743],
+  [0, 1, 1, 0, -30383, 104755],
+  [2, 0, 0, -2, 15327, 10321],
+  [0, 0, 1, 2, -12528, 0],
+  [0, 0, 1, -2, 10980, 79661],
+  [4, 0, -1, 0, 10675, -34782],
+  [0, 0, 3, 0, 10034, -23210],
+  [4, 0, -2, 0, 8548, -21636],
+  [2, 1, -1, 0, -7888, 24208],
+  [2, 1, 0, 0, -6766, 30824],
+  [1, 0, -1, 0, -5163, -8379],
+  [1, 1, 0, 0, 4987, -16675],
+  [2, -1, 1, 0, 4036, -12831],
+  [2, 0, 2, 0, 3994, -10445],
+  [4, 0, 0, 0, 3861, -11650],
+  [2, 0, -3, 0, 3665, 14403],
+  [0, 1, -2, 0, -2689, -7003],
+  [2, 0, -1, 2, -2602, 0],
+  [2, -1, -2, 0, 2390, 10056],
+  [1, 0, 1, 0, -2348, 6322],
+  [2, -2, 0, 0, 2236, -9884],
+  [0, 1, 2, 0, -2120, 5751],
+  [0, 2, 0, 0, -2069, 0],
+  [2, -2, -1, 0, 2048, -4950],
+  [2, 0, 1, -2, -1773, 4130],
+  [2, 0, 0, 2, -1595, 0],
+  [4, -1, -1, 0, 1215, -3958],
+  [0, 0, 2, 2, -1110, 0],
+  [3, 0, -1, 0, -892, 3258],
+  [2, 1, 1, 0, -810, 2616],
+  [4, -1, -2, 0, 759, -1897],
+  [0, 2, -1, 0, -713, -2117],
+  [2, 2, -1, 0, -700, 2354],
+  [2, 1, -2, 0, 691, 0],
+  [2, -1, 0, -2, 596, 0],
+  [4, 0, 1, 0, 549, -1423],
+  [0, 0, 4, 0, 537, -1117],
+  [4, -1, 0, 0, 520, -1571],
+  [1, 0, -2, 0, -487, -1739],
+  [2, 1, 0, -2, -399, 0],
+  [0, 0, 2, -2, -381, -4421],
+  [1, 1, 1, 0, 351, 0],
+  [3, 0, -2, 0, -340, 0],
+  [4, 0, -3, 0, 330, 0],
+  [2, -1, 2, 0, 327, 0],
+  [0, 2, 1, 0, -323, 1165],
+  [1, 1, -1, 0, 299, 0],
+  [2, 0, 3, 0, 294, 0],
+  [2, 0, -1, -2, 0, 8752],
+];
+
+const LUNAR_LATITUDE_TERMS: LunarLatitudeTerm[] = [
+  [0, 0, 0, 1, 5128122],
+  [0, 0, 1, 1, 280602],
+  [0, 0, 1, -1, 277693],
+  [2, 0, 0, -1, 173237],
+  [2, 0, -1, 1, 55413],
+  [2, 0, -1, -1, 46271],
+  [2, 0, 0, 1, 32573],
+  [0, 0, 2, 1, 17198],
+  [2, 0, 1, -1, 9266],
+  [0, 0, 2, -1, 8822],
+  [2, -1, 0, -1, 8216],
+  [2, 0, -2, -1, 4324],
+  [2, 0, 1, 1, 4200],
+  [2, 1, 0, -1, -3359],
+  [2, -1, -1, 1, 2463],
+  [2, -1, 0, 1, 2211],
+  [2, -1, -1, -1, 2065],
+  [0, 1, -1, -1, -1870],
+  [4, 0, -1, -1, 1828],
+  [0, 1, 0, 1, -1794],
+  [0, 0, 0, 3, -1749],
+  [0, 1, -1, 1, -1565],
+  [1, 0, 0, 1, -1491],
+  [0, 1, 1, 1, -1475],
+  [0, 1, 1, -1, -1410],
+  [0, 1, 0, -1, -1344],
+  [1, 0, 0, -1, -1335],
+  [0, 0, 3, 1, 1107],
+  [4, 0, 0, -1, 1021],
+  [4, 0, -1, 1, 833],
+  [0, 0, 1, -3, 777],
+  [4, 0, -2, 1, 671],
+  [2, 0, 0, -3, 607],
+  [2, 0, 2, -1, 596],
+  [2, -1, 1, -1, 491],
+  [2, 0, -2, 1, -451],
+  [0, 0, 3, -1, 439],
+  [2, 0, 2, 1, 422],
+  [2, 0, -3, -1, 421],
+  [2, 1, -1, 1, -366],
+  [2, 1, 0, 1, -351],
+  [4, 0, 0, 1, 331],
+  [2, -1, 1, 1, 315],
+  [2, -2, 0, -1, 302],
+  [0, 0, 1, 3, -283],
+  [2, 1, 1, -1, -229],
+  [1, 1, 0, -1, 223],
+  [1, 1, 0, 1, 223],
+  [0, 1, -2, -1, -220],
+  [2, 1, -1, -1, -220],
+  [1, 0, 1, 1, -185],
+  [2, -1, -2, -1, 181],
+  [0, 1, 2, 1, -177],
+  [4, 0, -2, -1, 176],
+  [4, -1, -1, -1, 166],
+  [1, 0, 1, -1, -164],
+  [4, 0, 1, -1, 132],
+  [1, 0, -1, -1, -119],
+  [4, -1, 0, -1, 115],
+  [2, -2, 0, 1, 107],
+];
+
 /**
  * SpaceSceneComponent
  *
@@ -95,19 +231,12 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
   private readonly SUN_LIGHT_DISTANCE = 650;
   private readonly SUN_VISUAL_ORBIT_RADIUS = 3.8;
   private readonly SUN_CAMERA_HIDE_PAD = 0.2;
-  private readonly LUNAR_SYNODIC_MONTH_DAYS = 29.530588853;
-  private readonly LUNAR_ANOMALISTIC_MONTH_DAYS = 27.55454988;
-  private readonly LUNAR_DRACONIC_MONTH_DAYS = 27.212220817;
-  private readonly KNOWN_NEW_MOON_DAY_NUMBER = 2451550.25972; // 2000-01-06 18:14 UTC
-  private readonly KNOWN_LUNAR_PERIGEE_DAY_NUMBER = 2451534.6698;
-  private readonly KNOWN_LUNAR_ASCENDING_NODE_DAY_NUMBER = 2451565.0;
-  private readonly LUNAR_ECCENTRICITY = 0.0549;
   private readonly MOON_ORBIT_RADIUS = 1.45;
+  private readonly MOON_MEAN_DISTANCE_KM = 385000.56;
   private readonly MOON_RADIUS = 0.075;
-  private readonly MOON_ORBIT_INCLINATION_RAD = THREE.MathUtils.degToRad(5.14);
-  private readonly ECLIPSE_SHADOW_RADIUS = 0.24;
-  private readonly ECLIPSE_SHADOW_INNER_ANGLE_RAD = THREE.MathUtils.degToRad(1.5);
-  private readonly ECLIPSE_SHADOW_OUTER_ANGLE_RAD = THREE.MathUtils.degToRad(9);
+  private readonly ECLIPSE_SHADOW_RADIUS = 0.32;
+  private readonly ECLIPSE_SHADOW_INNER_ANGLE_RAD = THREE.MathUtils.degToRad(2);
+  private readonly ECLIPSE_SHADOW_OUTER_ANGLE_RAD = THREE.MathUtils.degToRad(10);
   private readonly STAR_ANNUAL_AXIS = new THREE.Vector3(0, 1, 0);
   private readonly SHADOW_PLANE_NORMAL = new THREE.Vector3(0, 0, 1);
   private readonly localSunDirection = new THREE.Vector3();
@@ -122,6 +251,9 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
   private readonly markerCameraDirection = new THREE.Vector3();
   private readonly markerNormal = new THREE.Vector3();
   private readonly annualStarRotation = new THREE.Quaternion();
+  private readonly raycaster = new THREE.Raycaster();
+  private readonly pointerNdc = new THREE.Vector2();
+  private readonly pointerHitLocal = new THREE.Vector3();
   private earthGeometry!: THREE.SphereGeometry;
   private moonGeometry!: THREE.SphereGeometry;
   private moonTexture: THREE.Texture | null = null;
@@ -152,6 +284,16 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
   private animationFrameId: number | null = null;
   private locationMarker: THREE.Sprite | null = null;
   private currentMarkerPosition: { lat: number; lon: number } | null = null;
+  private pointerInteraction: {
+    pointerId: number;
+    startX: number;
+    startY: number;
+    lastX: number;
+    lastY: number;
+    startRotationX: number;
+    startRotationY: number;
+    dragging: boolean;
+  } | null = null;
 
   // Rotation animation state
   private rotationAnimation: {
@@ -166,6 +308,7 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
 
   ngAfterViewInit(): void {
     this.initScene();
+    this.registerPointerInteraction();
     this.startAnimation();
 
     // Watch for canvas size changes
@@ -190,6 +333,8 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     if (this.resizeObserver) {
       this.resizeObserver.disconnect();
     }
+
+    this.unregisterPointerInteraction();
 
     if (this.renderer) {
       this.renderer.dispose();
@@ -227,23 +372,7 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
   ): void {
     if (!this.earthGroup) return;
 
-    // Spherical coordinates: latitude (phi), longitude (theta)
-    // For Three.js, y is up, z is forward, x is right
-    // To center a point (lat, lon) at the front (z+), rotate y by -(lon + 90), x by lat
-    // The +90 offset matches the marker's math and texture alignment
-    const targetY = THREE.MathUtils.degToRad(-(longitude + 90));
-    const targetX = THREE.MathUtils.degToRad(latitude);
-
-    this.rotationAnimation = {
-      active: true,
-      startTime: performance.now(),
-      duration: durationMs,
-      startRotation: {
-        x: this.earthGroup.rotation.x,
-        y: this.earthGroup.rotation.y,
-      },
-      targetRotation: { x: targetX, y: targetY },
-    };
+    this.startRotationTo(longitude, latitude, durationMs);
 
     if (targetYearFraction != null && Number.isFinite(targetYearFraction)) {
       this.startTimeTransition(
@@ -290,6 +419,154 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     this.timeAnimation = null;
     this.setCelestialPhasesFromYearFraction(yearFraction);
     this.applySunOrbit();
+  }
+
+  private registerPointerInteraction(): void {
+    window.addEventListener('pointerdown', this.handlePointerDown, { passive: false });
+    window.addEventListener('pointermove', this.handlePointerMove, { passive: false });
+    window.addEventListener('pointerup', this.handlePointerUp, { passive: false });
+    window.addEventListener('pointercancel', this.handlePointerCancel);
+  }
+
+  private unregisterPointerInteraction(): void {
+    window.removeEventListener('pointerdown', this.handlePointerDown);
+    window.removeEventListener('pointermove', this.handlePointerMove);
+    window.removeEventListener('pointerup', this.handlePointerUp);
+    window.removeEventListener('pointercancel', this.handlePointerCancel);
+    document.body.style.cursor = '';
+  }
+
+  private handlePointerDown = (event: PointerEvent): void => {
+    if (!this.earthGroup || !this.camera || !this.baseMesh) return;
+    if (!this.pointerHitsEarth(event.clientX, event.clientY)) return;
+
+    event.preventDefault();
+    this.pointerInteraction = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      lastX: event.clientX,
+      lastY: event.clientY,
+      startRotationX: this.earthGroup.rotation.x,
+      startRotationY: this.earthGroup.rotation.y,
+      dragging: false,
+    };
+    document.body.style.cursor = 'grabbing';
+  };
+
+  private handlePointerMove = (event: PointerEvent): void => {
+    const interaction = this.pointerInteraction;
+    if (!interaction || event.pointerId !== interaction.pointerId || !this.earthGroup) return;
+
+    event.preventDefault();
+    interaction.lastX = event.clientX;
+    interaction.lastY = event.clientY;
+
+    const dx = event.clientX - interaction.startX;
+    const dy = event.clientY - interaction.startY;
+    const distanceSq = dx * dx + dy * dy;
+    if (!interaction.dragging && distanceSq < 16) return;
+
+    interaction.dragging = true;
+    this.rotationAnimation = null;
+
+    const sensitivity = 0.006;
+    this.earthGroup.rotation.y = interaction.startRotationY + dx * sensitivity;
+    this.earthGroup.rotation.x = THREE.MathUtils.clamp(
+      interaction.startRotationX + dy * sensitivity,
+      -Math.PI / 2,
+      Math.PI / 2
+    );
+    this.applySunOrbit();
+  };
+
+  private handlePointerUp = (event: PointerEvent): void => {
+    const interaction = this.pointerInteraction;
+    if (!interaction || event.pointerId !== interaction.pointerId) return;
+
+    event.preventDefault();
+    this.pointerInteraction = null;
+    document.body.style.cursor = '';
+
+    if (interaction.dragging) return;
+
+    const hit = this.pointerHitsEarth(event.clientX, event.clientY);
+    if (!hit) return;
+
+    const target = this.latLonFromLocalPoint(this.pointerHitLocal);
+    this.startRotationTo(target.lon, target.lat, 700);
+  };
+
+  private handlePointerCancel = (event: PointerEvent): void => {
+    const interaction = this.pointerInteraction;
+    if (!interaction || event.pointerId !== interaction.pointerId) return;
+    this.pointerInteraction = null;
+    document.body.style.cursor = '';
+  };
+
+  private pointerHitsEarth(clientX: number, clientY: number): boolean {
+    if (!this.camera || !this.earthGroup) return false;
+
+    const rect = this.canvasRef.nativeElement.getBoundingClientRect();
+    if (
+      clientX < rect.left ||
+      clientX > rect.right ||
+      clientY < rect.top ||
+      clientY > rect.bottom ||
+      rect.width <= 0 ||
+      rect.height <= 0
+    ) {
+      return false;
+    }
+
+    this.pointerNdc.set(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -(((clientY - rect.top) / rect.height) * 2 - 1)
+    );
+    this.raycaster.setFromCamera(this.pointerNdc, this.camera);
+
+    const earthMeshes = [this.baseMesh, this.waterDiffuseMesh, this.cloudsMesh].filter(
+      (mesh): mesh is THREE.Mesh => !!mesh
+    );
+    const hits = this.raycaster.intersectObjects(earthMeshes, false);
+    const hit = hits[0];
+    if (!hit) return false;
+
+    this.pointerHitLocal.copy(hit.point);
+    this.earthGroup.worldToLocal(this.pointerHitLocal);
+    this.pointerHitLocal.normalize();
+    return true;
+  }
+
+  private latLonFromLocalPoint(point: THREE.Vector3): { lat: number; lon: number } {
+    const lat = THREE.MathUtils.radToDeg(Math.asin(THREE.MathUtils.clamp(point.y, -1, 1)));
+    const lon = this.normalizeLongitude(THREE.MathUtils.radToDeg(Math.atan2(point.x, point.z)) - 90);
+    return { lat, lon };
+  }
+
+  private normalizeLongitude(longitude: number): number {
+    return THREE.MathUtils.euclideanModulo(longitude + 180, 360) - 180;
+  }
+
+  private startRotationTo(longitude: number, latitude: number, durationMs: number): void {
+    if (!this.earthGroup) return;
+
+    // Spherical coordinates: latitude (phi), longitude (theta)
+    // For Three.js, y is up, z is forward, x is right.
+    // The +90 offset matches the marker's math and texture alignment.
+    const targetY = THREE.MathUtils.degToRad(-(longitude + 90));
+    const targetX = THREE.MathUtils.degToRad(latitude);
+
+    this.rotationAnimation = {
+      active: true,
+      startTime: performance.now(),
+      duration: durationMs,
+      startRotation: {
+        x: this.earthGroup.rotation.x,
+        y: this.earthGroup.rotation.y,
+      },
+      targetRotation: { x: targetX, y: targetY },
+    };
   }
 
   private initScene(): void {
@@ -578,9 +855,10 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
 
     const center = size / 2;
     const gradient = ctx.createRadialGradient(center, center, 0, center, center, center);
-    gradient.addColorStop(0, 'rgba(0,0,0,0.78)');
-    gradient.addColorStop(0.3, 'rgba(0,0,0,0.48)');
-    gradient.addColorStop(0.68, 'rgba(0,0,0,0.16)');
+    gradient.addColorStop(0, 'rgba(0,0,0,1)');
+    gradient.addColorStop(0.24, 'rgba(0,0,0,0.88)');
+    gradient.addColorStop(0.55, 'rgba(0,0,0,0.38)');
+    gradient.addColorStop(0.82, 'rgba(0,0,0,0.12)');
     gradient.addColorStop(1, 'rgba(0,0,0,0)');
 
     ctx.fillStyle = gradient;
@@ -800,14 +1078,15 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     if (!this.moonMesh) return;
 
     const dayNumber = this.dayNumberFromYearFraction(this.currentCelestialYearFraction);
-    const lunarPhase = this.lunarPhaseFromDayNumber(dayNumber);
-    const lunarLatitude = this.lunarLatitudeFromDayNumber(dayNumber);
-    const lunarDistance = this.lunarDistanceFromDayNumber(dayNumber);
+    const moonPosition = this.lunarPositionFromDayNumber(dayNumber);
+    const sunLongitude = this.solarLongitudeFromDayNumber(dayNumber);
+    const elongation = this.normalizeRadians(moonPosition.longitude - sunLongitude);
+    const distanceScale = moonPosition.distanceKm / this.MOON_MEAN_DISTANCE_KM;
 
     this.localMoonDirection
       .copy(this.localSunDirection)
-      .applyAxisAngle(this.STAR_ANNUAL_AXIS, lunarPhase);
-    this.localMoonDirection.y += Math.sin(lunarLatitude);
+      .applyAxisAngle(this.STAR_ANNUAL_AXIS, elongation);
+    this.localMoonDirection.y += Math.sin(moonPosition.latitude);
     this.localMoonDirection.normalize();
 
     this.worldMoonDirection.copy(this.localMoonDirection);
@@ -815,33 +1094,96 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
       this.worldMoonDirection.applyQuaternion(this.earthGroup.quaternion);
     }
 
-    this.moonMesh.position.copy(this.worldMoonDirection).multiplyScalar(lunarDistance);
+    this.moonMesh.position
+      .copy(this.worldMoonDirection)
+      .multiplyScalar(this.MOON_ORBIT_RADIUS * distanceScale);
     this.moonMesh.visible = this.worldMoonDirection.z > -0.92;
     this.applyEclipseShadow();
   }
 
-  private lunarPhaseFromDayNumber(dayNumber: number): number {
-    const elapsedDays = dayNumber - this.KNOWN_NEW_MOON_DAY_NUMBER;
-    return this.cyclePhase(elapsedDays, this.LUNAR_SYNODIC_MONTH_DAYS);
+  private lunarPositionFromDayNumber(dayNumber: number): {
+    longitude: number;
+    latitude: number;
+    distanceKm: number;
+  } {
+    const t = (dayNumber - 2451545.0) / 36525;
+    const t2 = t * t;
+    const t3 = t2 * t;
+    const t4 = t3 * t;
+    const lPrime = THREE.MathUtils.degToRad(
+      this.normalizeDegrees(
+        218.3164477 + 481267.88123421 * t - 0.0015786 * t2 + t3 / 538841 - t4 / 65194000
+      )
+    );
+    const d = THREE.MathUtils.degToRad(
+      this.normalizeDegrees(
+        297.8501921 + 445267.1114034 * t - 0.0018819 * t2 + t3 / 545868 - t4 / 113065000
+      )
+    );
+    const m = THREE.MathUtils.degToRad(
+      this.normalizeDegrees(
+        357.5291092 + 35999.0502909 * t - 0.0001536 * t2 + t3 / 24490000
+      )
+    );
+    const mp = THREE.MathUtils.degToRad(
+      this.normalizeDegrees(
+        134.9633964 + 477198.8675055 * t + 0.0087414 * t2 + t3 / 69699 - t4 / 14712000
+      )
+    );
+    const f = THREE.MathUtils.degToRad(
+      this.normalizeDegrees(
+        93.272095 + 483202.0175233 * t - 0.0036539 * t2 - t3 / 3526000 + t4 / 863310000
+      )
+    );
+    const e = 1 - 0.002516 * t - 0.0000074 * t2;
+
+    let longitudeCorrection = 0;
+    let distanceCorrection = 0;
+    for (const term of LUNAR_LONGITUDE_DISTANCE_TERMS) {
+      const [dMul, mMul, mpMul, fMul, lCoeff, rCoeff] = term;
+      const eFactor = Math.abs(mMul) === 1 ? e : Math.abs(mMul) === 2 ? e * e : 1;
+      const arg = dMul * d + mMul * m + mpMul * mp + fMul * f;
+      longitudeCorrection += eFactor * lCoeff * Math.sin(arg);
+      distanceCorrection += eFactor * rCoeff * Math.cos(arg);
+    }
+
+    let latitudeCorrection = 0;
+    for (const term of LUNAR_LATITUDE_TERMS) {
+      const [dMul, mMul, mpMul, fMul, bCoeff] = term;
+      const eFactor = Math.abs(mMul) === 1 ? e : Math.abs(mMul) === 2 ? e * e : 1;
+      const arg = dMul * d + mMul * m + mpMul * mp + fMul * f;
+      latitudeCorrection += eFactor * bCoeff * Math.sin(arg);
+    }
+
+    return {
+      longitude: this.normalizeRadians(
+        lPrime + THREE.MathUtils.degToRad(longitudeCorrection / 1e6)
+      ),
+      latitude: THREE.MathUtils.degToRad(latitudeCorrection / 1e6),
+      distanceKm: 385000.56 + distanceCorrection / 1000,
+    };
   }
 
-  private lunarLatitudeFromDayNumber(dayNumber: number): number {
-    const elapsedDays = dayNumber - this.KNOWN_LUNAR_ASCENDING_NODE_DAY_NUMBER;
-    const draconicPhase = this.cyclePhase(elapsedDays, this.LUNAR_DRACONIC_MONTH_DAYS);
-    return Math.asin(Math.sin(this.MOON_ORBIT_INCLINATION_RAD) * Math.sin(draconicPhase));
+  private solarLongitudeFromDayNumber(dayNumber: number): number {
+    const t = (dayNumber - 2451545.0) / 36525;
+    const t2 = t * t;
+    const meanLongitude = this.normalizeDegrees(280.46646 + 36000.76983 * t + 0.0003032 * t2);
+    const meanAnomaly = THREE.MathUtils.degToRad(
+      this.normalizeDegrees(357.52911 + 35999.05029 * t - 0.0001537 * t2)
+    );
+    const center =
+      (1.914602 - 0.004817 * t - 0.000014 * t2) * Math.sin(meanAnomaly) +
+      (0.019993 - 0.000101 * t) * Math.sin(2 * meanAnomaly) +
+      0.000289 * Math.sin(3 * meanAnomaly);
+    return THREE.MathUtils.degToRad(this.normalizeDegrees(meanLongitude + center));
   }
 
-  private lunarDistanceFromDayNumber(dayNumber: number): number {
-    const elapsedDays = dayNumber - this.KNOWN_LUNAR_PERIGEE_DAY_NUMBER;
-    const meanAnomaly = this.cyclePhase(elapsedDays, this.LUNAR_ANOMALISTIC_MONTH_DAYS);
-    const distanceScale =
-      (1 - this.LUNAR_ECCENTRICITY * this.LUNAR_ECCENTRICITY) /
-      (1 + this.LUNAR_ECCENTRICITY * Math.cos(meanAnomaly));
-    return this.MOON_ORBIT_RADIUS * distanceScale;
+  private normalizeDegrees(degrees: number): number {
+    return THREE.MathUtils.euclideanModulo(degrees, 360);
   }
 
-  private cyclePhase(elapsedDays: number, cycleDays: number): number {
-    return THREE.MathUtils.euclideanModulo(elapsedDays / cycleDays, 1) * this.TWO_PI;
+  private normalizeRadians(radians: number): number {
+    return THREE.MathUtils.euclideanModulo(radians, this.TWO_PI);
   }
 
   private dayNumberFromYearFraction(yearFraction: number): number {
@@ -889,7 +1231,7 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
       this.ECLIPSE_SHADOW_OUTER_ANGLE_RAD,
       alignmentAngle
     );
-    const opacity = alignment * 0.78;
+    const opacity = Math.pow(alignment, 0.65) * 0.95;
 
     this.localShadowDirection.copy(this.localMoonDirection).normalize();
     this.eclipseShadowMesh.position.copy(this.localShadowDirection).multiplyScalar(1.011);

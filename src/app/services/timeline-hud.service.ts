@@ -20,6 +20,7 @@ export interface DrawCenterlineParams {
   entries: Array<{ yf: number }>;
   yearToY: (y: number) => number;
   formatLabel: (year: number, unit: number) => string;
+  formatLabelByZoomLevel?: (year: number, zoomLevelName: string) => string;
   snapToUnit: (year: number, unit: number) => number;
   dateService: any;
 }
@@ -36,6 +37,7 @@ export interface DrawHudLayerParams {
   yToYearDev: (yDev: number) => number;
   nowYearFraction: () => number;
   formatLabelByUnit: (year: number, unit: number) => string;
+  formatLabelByZoomLevel?: (year: number, zoomLevelName: string) => string;
   labelFromDayOfYear: (year: number, dayOfYear: number) => string;
   daysInYear: (year: number) => number;
   getMonthName: (month: number) => string;
@@ -95,20 +97,21 @@ export class TimelineHudService {
       canvasWidth: Wc,
       canvasHeight: Hc,
       dpr,
-      screenWidth,
       unitYears,
       zoomLevelName,
       yearToY,
       yToYearDev,
       nowYearFraction,
       formatLabelByUnit,
+      formatLabelByZoomLevel,
       dateService,
     } = params;
 
     const thick = Math.max(1, Math.round(this.grid.thicknessCSS * dpr));
-    const segLen = Math.max(2, Math.round((screenWidth || Wc) * 0.1 * dpr));
+    const segLen = Math.max(2, Math.round(Wc * 0.1));
     const x0 = Math.round((Wc - segLen) / 2);
     const labelMargin = Math.round(6 * dpr);
+    const labelMaxWidth = Math.max(24 * dpr, x0 - labelMargin * 2);
 
     // Ensure readable label size on HiDPI canvases (match centerline and today label)
     ctx.font = `${Math.max(11, Math.round(13 * dpr))}px system-ui, sans-serif`;
@@ -147,12 +150,14 @@ export class TimelineHudService {
         ctx.globalAlpha = opacity;
         ctx.fillRect(x0, Math.round(yPx - Math.floor(thick / 2)), segLen, thick);
 
-        const label = formatLabelByUnit(yTick, unitYears);
+        const label = formatLabelByZoomLevel
+          ? formatLabelByZoomLevel(yTick, zoomLevelName)
+          : formatLabelByUnit(yTick, unitYears);
         if (label) {
           ctx.fillStyle = 'rgba(255,170,80,0.95)';
           ctx.textAlign = 'right';
           ctx.textBaseline = 'middle';
-          ctx.fillText(label, x0 - labelMargin, Math.round(yPx));
+          ctx.fillText(label, x0 - labelMargin, Math.round(yPx), labelMaxWidth);
         }
 
         ctx.globalAlpha = 1.0; // reset
@@ -175,7 +180,7 @@ export class TimelineHudService {
       const todayLabel = formatLabelByUnit(nowYF, dayUnit);
       ctx.textAlign = 'right';
       ctx.fillStyle = 'rgba(255,70,70,0.95)';
-      ctx.fillText(todayLabel, x0 - labelMargin, Math.round(yToday));
+      ctx.fillText(todayLabel, x0 - labelMargin, Math.round(yToday), labelMaxWidth);
       ctx.restore();
     }
   }
@@ -186,7 +191,6 @@ export class TimelineHudService {
       canvasWidth,
       canvasHeight,
       dpr,
-      screenWidth,
       currentZoomIdx,
       scrollY,
       scrollMin,
@@ -194,6 +198,7 @@ export class TimelineHudService {
       entries,
       yearToY,
       formatLabel,
+      formatLabelByZoomLevel,
       snapToUnit,
     } = params;
 
@@ -220,11 +225,17 @@ export class TimelineHudService {
       }
     }
 
-    const label = formatLabel(snapped, unit);
+    const zoomLevelName = this.huds[currentZoomIdx]?.id
+      ? this.zoomNameFromHudId(this.huds[currentZoomIdx].id)
+      : 'Year';
+    const label = formatLabelByZoomLevel
+      ? formatLabelByZoomLevel(snapped, zoomLevelName)
+      : formatLabel(snapped, unit);
     const thick = Math.max(1, Math.round(this.grid.thicknessCSS * dpr));
-    const segLen = Math.max(2, Math.round((screenWidth || canvasWidth) * 0.1 * dpr));
+    const segLen = Math.max(2, Math.round(canvasWidth * 0.1));
     const x0 = Math.round((canvasWidth - segLen) / 2);
     const labelMargin = Math.round(6 * dpr);
+    const labelMaxWidth = Math.max(24 * dpr, x0 - labelMargin * 2);
 
     ctx.save();
     ctx.fillStyle = 'rgba(200,200,210,0.65)';
@@ -238,10 +249,31 @@ export class TimelineHudService {
     const labelWidth = metrics.width;
     const labelX = x0 - labelMargin;
 
-    if (labelX - labelWidth > labelMargin) {
-      ctx.fillText(label, labelX, y);
+    if (labelX > labelMargin) {
+      ctx.fillText(label, labelX, y, Math.min(labelWidth, labelMaxWidth));
     }
 
     ctx.restore();
+  }
+
+  private zoomNameFromHudId(id: string): string {
+    switch (id) {
+      case 'guidesDay':
+        return 'Day';
+      case 'guidesWeek':
+        return 'Week';
+      case 'guidesMonth':
+        return 'Month';
+      case 'guidesYear':
+        return 'Year';
+      case 'guidesDecade':
+        return 'Decade';
+      case 'guidesCentury':
+        return 'Century';
+      case 'guidesMilennium':
+        return 'Milennium';
+      default:
+        return 'Year';
+    }
   }
 }

@@ -1,6 +1,57 @@
 # TimelineDemo
 
-Renders a vertical timeline
+Renders a vertical biblical timeline beside a Three.js earth, sun, moon, and starfield scene.
+
+The long-term goal is a searchable biblical archive through time and space: selecting a passage or
+event should move the timeline to the approximate date and rotate the globe toward the approximate
+place.
+
+## Current Astronomy Model
+
+The space scene is a visual reconstruction layer, not a full observatory-grade ephemeris. It is
+designed to stay performant while giving biblical and historical events plausible celestial context.
+
+- The sun position is deterministic from the current timeline date and simulates day/night without
+  continuously rotating the earth relative to the viewer.
+- The visible starfield follows the earth orientation and annual solar phase so the viewer's
+  perspective remains coherent during time progression.
+- The moon uses a compact Meeus-style geocentric lunar position calculation derived from periodic
+  terms for lunar longitude, latitude, and distance.
+- The moon is no longer fixed-distance: its rendered orbit scales from calculated Earth-Moon
+  distance.
+- The moon's north/south position comes from calculated lunar ecliptic latitude, which is important
+  for eclipse alignment.
+- Solar eclipse shadows are represented with a cheap visual approximation: one transparent radial
+  texture on a small plane near Earth's surface when the sun and moon align closely.
+- NASA solar eclipse reference data is stored separately under `src/app/data/astronomy/`. This data
+  should be used as a ground-truth fixture for validating future eclipse-path calculations before
+  replacing the current visual approximation.
+
+### Accuracy Notes
+
+The lunar calculation is intended to make phases, distance changes, and node crossings line up
+reasonably well with real dates. For ancient BCE dates, exact eclipse visibility still needs explicit
+event metadata and historical eclipse catalog validation because calendar conversions and long-term
+Earth rotation uncertainty matter.
+
+Future event metadata should distinguish between:
+
+- ordinary astronomical events, such as solar eclipses, lunar eclipses, moon phases, and local solar
+  time;
+- textual sign or miracle events, such as the shadow moving backward in 2 Kings 20 and Isaiah 38.
+
+### NASA Eclipse References
+
+The first imported reference is NASA's Total Solar Eclipse of 2027 Aug 02. It includes:
+
+- greatest-eclipse location and timing;
+- sampled central-line path coordinates;
+- Besselian polynomial coefficients;
+- source URLs for NASA's path table and Besselian elements table.
+
+This reference intentionally confirms that the total path is near North Africa, Egypt, the Red Sea
+region, Yemen, Somalia, and the Indian Ocean. Israel is outside the totality path but within the
+broader partial-visibility region.
 
 This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 20.3.4.
 
@@ -9,6 +60,7 @@ This project was generated using [Angular CLI](https://github.com/angular/angula
 To start a local development server, run:
 
 ```bash
+nvm use 22
 ng serve
 ```
 
