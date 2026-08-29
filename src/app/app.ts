@@ -641,6 +641,7 @@ export class App implements AfterViewInit, OnDestroy {
       }
     }
     this.spaceScene.setEarthRotationsPerSecond(0);
+    this.spaceScene.setCloudDriftMultiplier(this.timeProgressionMultiplier);
   }
 
   private currentTimelineYearFraction(): number | null {

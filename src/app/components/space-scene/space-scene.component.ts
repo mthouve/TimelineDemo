@@ -237,6 +237,14 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
   private readonly ECLIPSE_SHADOW_RADIUS = 0.32;
   private readonly ECLIPSE_SHADOW_INNER_ANGLE_RAD = THREE.MathUtils.degToRad(2);
   private readonly ECLIPSE_SHADOW_OUTER_ANGLE_RAD = THREE.MathUtils.degToRad(10);
+  private readonly CLOUD_BASE_SPEED_MPH = 8;
+  private readonly EARTH_EQUATORIAL_CIRCUMFERENCE_MILES = 24901;
+  private readonly SIMULATED_DAY_SECONDS_AT_1X = 15;
+  private readonly CLOUD_DRIFT_ROTATIONS_PER_SECOND_AT_1X =
+    (this.CLOUD_BASE_SPEED_MPH * 24) /
+    (this.EARTH_EQUATORIAL_CIRCUMFERENCE_MILES * this.SIMULATED_DAY_SECONDS_AT_1X);
+  private readonly CLOUD_DRIFT_Y_VARIATION_RADIANS = 0.045;
+  private readonly CLOUD_DRIFT_Y_VARIATION_SECONDS = 60;
   private readonly STAR_ANNUAL_AXIS = new THREE.Vector3(0, 1, 0);
   private readonly SHADOW_PLANE_NORMAL = new THREE.Vector3(0, 0, 1);
   private readonly localSunDirection = new THREE.Vector3();
@@ -267,6 +275,7 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
   private cloudsMaterial!: THREE.MeshPhongMaterial;
 
   private baseMesh!: THREE.Mesh;
+  private cloudsGroup!: THREE.Group;
   private atmosphereMesh!: THREE.Mesh;
   private atmosphereMaterial!: THREE.ShaderMaterial;
   private waterDiffuseMesh!: THREE.Mesh;
@@ -284,6 +293,8 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
   private animationFrameId: number | null = null;
   private locationMarker: THREE.Sprite | null = null;
   private currentMarkerPosition: { lat: number; lon: number } | null = null;
+  private cloudDriftRotationsPerSecond = this.CLOUD_DRIFT_ROTATIONS_PER_SECOND_AT_1X;
+  private cloudDriftElapsedSeconds = 0;
   private pointerInteraction: {
     pointerId: number;
     startX: number;
@@ -414,6 +425,12 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     }
   }
 
+  public setCloudDriftMultiplier(multiplier: number): void {
+    const safeMultiplier = Number.isFinite(multiplier) ? Math.max(0, multiplier) : 0;
+    this.cloudDriftRotationsPerSecond =
+      safeMultiplier * this.CLOUD_DRIFT_ROTATIONS_PER_SECOND_AT_1X;
+  }
+
   public setCelestialYearFraction(yearFraction: number): void {
     if (!Number.isFinite(yearFraction)) return;
     this.timeAnimation = null;
@@ -525,7 +542,7 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     );
     this.raycaster.setFromCamera(this.pointerNdc, this.camera);
 
-    const earthMeshes = [this.baseMesh, this.waterDiffuseMesh, this.cloudsMesh].filter(
+    const earthMeshes = [this.baseMesh, this.waterDiffuseMesh].filter(
       (mesh): mesh is THREE.Mesh => !!mesh
     );
     const hits = this.raycaster.intersectObjects(earthMeshes, false);
@@ -661,6 +678,7 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
 
     // Set up group for Earth and layers
     this.earthGroup = new THREE.Group();
+    this.cloudsGroup = new THREE.Group();
 
     // Load textures and create materials
     const textureLoader = new THREE.TextureLoader();
@@ -759,7 +777,8 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     this.cloudsMesh = new THREE.Mesh(this.earthGeometry, this.cloudsMaterial);
     this.cloudsMesh.scale.setScalar(1.003); // just above the surface
     this.cloudsMesh.renderOrder = 20;
-    this.earthGroup.add(this.cloudsMesh);
+    this.cloudsGroup.add(this.cloudsMesh);
+    this.earthGroup.add(this.cloudsGroup);
 
     // Add atmosphere: blue at edge, clear at center (limb-brightened)
     this.atmosphereMaterial = new THREE.ShaderMaterial({
@@ -1244,6 +1263,18 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     this.eclipseShadowMaterial.opacity = opacity;
   }
 
+  private advanceCloudDrift(deltaSeconds: number): void {
+    if (!this.cloudsGroup) return;
+    if (this.cloudDriftRotationsPerSecond <= 0 || deltaSeconds <= 0) return;
+
+    this.cloudDriftElapsedSeconds += deltaSeconds;
+    const driftRotations = this.cloudDriftElapsedSeconds * this.cloudDriftRotationsPerSecond;
+    this.cloudsGroup.rotation.y = driftRotations * this.TWO_PI;
+    this.cloudsGroup.rotation.x =
+      Math.sin((this.cloudDriftElapsedSeconds / this.CLOUD_DRIFT_Y_VARIATION_SECONDS) * this.TWO_PI) *
+      this.CLOUD_DRIFT_Y_VARIATION_RADIANS;
+  }
+
   private smoothstep(edge0: number, edge1: number, value: number): number {
     const x = THREE.MathUtils.clamp((value - edge0) / (edge1 - edge0), 0, 1);
     return x * x * (3 - 2 * x);
@@ -1282,6 +1313,8 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     if (earthRotatedThisFrame) {
       this.applySunOrbit();
     }
+
+    this.advanceCloudDrift(clampedDt);
 
     // Update marker position
     this.updateMarkerPosition();

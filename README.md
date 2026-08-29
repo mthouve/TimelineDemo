@@ -23,6 +23,8 @@ designed to stay performant while giving biblical and historical events plausibl
   for eclipse alignment.
 - Solar eclipse shadows are represented with a cheap visual approximation: one transparent radial
   texture on a small plane near Earth's surface when the sun and moon align closely.
+- The cloud layer uses a cosmetic drift model. Its baseline assumes about 8 mph cloud movement,
+  scaled through the Time control rather than attempting to simulate weather systems.
 - NASA solar eclipse reference data is stored separately under `src/app/data/astronomy/`. This data
   should be used as a ground-truth fixture for validating future eclipse-path calculations before
   replacing the current visual approximation.
