@@ -1,3 +1,5 @@
+![Timeline Demo banner](docs/assets/timeline-demo-readme-banner.png)
+
 # TimelineDemo
 
 Renders a vertical biblical timeline beside a Three.js earth, sun, moon, and starfield scene.
@@ -5,6 +7,10 @@ Renders a vertical biblical timeline beside a Three.js earth, sun, moon, and sta
 The long-term goal is a searchable biblical archive through time and space: selecting a passage or
 event should move the timeline to the approximate date and rotate the globe toward the approximate
 place.
+
+## Live Application Screenshot
+
+![Genesis 22 live application preview](docs/assets/genesis-22-preview.png)
 
 ## Current Astronomy Model
 
