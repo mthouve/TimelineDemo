@@ -8,6 +8,22 @@ The long-term goal is a searchable biblical archive through time and space: sele
 event should move the timeline to the approximate date and rotate the globe toward the approximate
 place.
 
+## Project Status
+
+TimelineDemo is still a proof of concept. The current app demonstrates the core interaction model:
+Bible passages, approximate timeline anchors, and geographic locations can drive the timeline and
+globe together. The data model, historical coverage, astronomy accuracy, and long-term archive
+architecture are still evolving.
+
+Today, the prototype includes:
+
+- a KJV Bible reader with Hebrew or Greek text beneath each verse;
+- clickable chapter-level timeline anchors for selected passages;
+- a vertical timeline HUD with zoom levels from day to millennium;
+- a Three.js earth scene with clouds, atmosphere, sun, moon, starfield, and location markers;
+- deterministic time progression that can move the celestial scene and timeline together;
+- early NASA eclipse reference data for validating future eclipse-path calculations.
+
 ## Live Application Screenshot
 
 ![Genesis 22 live application preview](docs/assets/genesis-22-preview.png)
@@ -64,8 +80,6 @@ This reference intentionally confirms that the total path is near North Africa, 
 region, Yemen, Somalia, and the Indian Ocean. Israel is outside the totality path but within the
 broader partial-visibility region.
 
-This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 20.3.4.
-
 ## Development server
 
 To start a local development server, run:
@@ -76,20 +90,6 @@ ng serve
 ```
 
 Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
-
-## Code scaffolding
-
-Angular CLI includes powerful code scaffolding tools. To generate a new component, run:
-
-```bash
-ng generate component component-name
-```
-
-For a complete list of available schematics (such as `components`, `directives`, or `pipes`), run:
-
-```bash
-ng generate --help
-```
 
 ## Building
 
@@ -108,17 +108,3 @@ To execute unit tests with the [Karma](https://karma-runner.github.io) test runn
 ```bash
 ng test
 ```
-
-## Running end-to-end tests
-
-For end-to-end (e2e) testing, run:
-
-```bash
-ng e2e
-```
-
-Angular CLI does not come with an end-to-end testing framework by default. You can choose one that suits your needs.
-
-## Additional Resources
-
-For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.
