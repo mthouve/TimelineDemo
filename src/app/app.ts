@@ -19,6 +19,10 @@ import { SettingsControlComponent } from './settings-control/settings-control.co
 import { BibleViewerComponent } from './bible-viewer/bible-viewer.component';
 import { CommonModule } from '@angular/common';
 import { TimelineEntry } from './models/timeline-entry.model';
+import {
+  BibleTimelineAnchor,
+  BibleTimelineAnchorViewScale,
+} from './data/bible-timeline-anchors';
 
 @Component({
   selector: 'app-root',
@@ -139,6 +143,20 @@ export class App implements AfterViewInit, OnDestroy {
       : this.SPACE_SCENE_MIN_TRANSITION_MS;
   }
 
+  private timeProgressionMultiplierForDaySeconds(daySeconds: number): number {
+    return this.TIME_PROGRESSION_DAY_SECONDS / daySeconds;
+  }
+
+  private isRealtimeProgression(): boolean {
+    return (
+      this.timeProgressionMultiplier > 0 &&
+      Math.abs(
+        this.timeProgressionMultiplier -
+          this.timeProgressionMultiplierForDaySeconds(this.REALTIME_DAY_SECONDS)
+      ) < 1e-9
+    );
+  }
+
   private scheduleTimelineTargetUpdate() {
     if (this.timelineTargetRafId !== null) return;
     this.timelineTargetRafId = requestAnimationFrame(() => {
@@ -166,14 +184,24 @@ export class App implements AfterViewInit, OnDestroy {
   zoomLevels: ZoomSpec[] = [];
   zoomLabels: string[] = [];
   currentZoomIdx = 3; // Year
+  private readonly REALTIME_DAY_SECONDS = 24 * 60 * 60;
+  private readonly TIME_PROGRESSION_DAY_SECONDS = 15;
+  private readonly REALTIME_PROGRESSION_UPDATE_INTERVAL_MS = 60 * 1000;
   timeProgressionOptions = [
     { label: 'Off', multiplier: 0 },
-    { label: '0.5x', multiplier: 0.5 },
-    { label: '1x', multiplier: 1 },
-    { label: '2x', multiplier: 2 },
-    { label: '4x', multiplier: 4 },
+    {
+      label: 'Realtime',
+      multiplier: this.timeProgressionMultiplierForDaySeconds(this.REALTIME_DAY_SECONDS),
+    },
+    { label: '10 min/day', multiplier: this.timeProgressionMultiplierForDaySeconds(10 * 60) },
+    { label: '3 min/day', multiplier: this.timeProgressionMultiplierForDaySeconds(3 * 60) },
+    { label: '1 min/day', multiplier: this.timeProgressionMultiplierForDaySeconds(60) },
+    { label: '20 s/day', multiplier: this.timeProgressionMultiplierForDaySeconds(20) },
   ];
   timeProgressionMultiplier = 0;
+  timelineSearchQuery = '';
+  timelineSearchResults: TimelineEntry[] = [];
+  timelineDateJump: { yf: number; label: string } | null = null;
 
   // Timing targets
   private readonly DUR_SINGLE_STEP_MS = 4000; // ~4s for 1-step jumps
@@ -204,14 +232,20 @@ export class App implements AfterViewInit, OnDestroy {
   private activeSpaceSceneEntryKey: string | null = null;
   private activeSpaceSceneEntryYear: number | null = null;
   private timeProgressionRafId: number | null = null;
+  private timeProgressionTimeoutId: number | null = null;
+  private timeProgressionAnchorYf: number | null = null;
   private lastTimeProgressionMs: number | null = null;
   private lastProgressionTimelineDrawYf: number | null = null;
   private lastProgressionTimelineDrawMs = 0;
-  private readonly TIME_PROGRESSION_DAY_SECONDS = 15;
   private readonly PROGRESSION_TIMELINE_MIN_DRAW_PX = 24;
   private readonly PROGRESSION_TIMELINE_MIN_DRAW_INTERVAL_MS = 180;
   private readonly SPACE_SCENE_MIN_TRANSITION_MS = 2200;
   private readonly SPACE_SCENE_MAX_TRANSITION_MS = 9000;
+  private readonly SPACE_SCENE_CAMERA_DISTANCES: Record<BibleTimelineAnchorViewScale, number> = {
+    global: 3.0,
+    regional: 1.85,
+    local: 1.45,
+  };
 
   // ── Sizing ────────────────────────────────────────────────────────────────────
   private dpr = Math.max(1, window.devicePixelRatio || 1);
@@ -412,14 +446,94 @@ export class App implements AfterViewInit, OnDestroy {
 
   onTimeProgressionChange(event: Event) {
     const select = event.target as HTMLSelectElement | null;
+    const displayedAnchorYf = this.spaceScene?.getDisplayedCelestialYearFraction() ?? null;
     const nextMultiplier = Number(select?.value ?? 1);
     this.timeProgressionMultiplier = Number.isFinite(nextMultiplier) ? nextMultiplier : 1;
     this.updateSpaceSceneTimeSpeed(false);
     if (this.timeProgressionMultiplier) {
-      this.startTimelineTimeProgression();
+      this.stopTimelineTimeProgression();
+      this.startTimelineTimeProgression(displayedAnchorYf);
     } else {
       this.stopTimelineTimeProgression();
     }
+  }
+
+  onTimelineSearchInput(event: Event) {
+    const input = event.target as HTMLInputElement;
+    this.timelineSearchQuery = input.value;
+    this.timelineSearchResults = this.timelineEntryService.searchEntries(input.value, 6);
+    this.timelineDateJump = this.parseTimelineDateJump(input.value);
+  }
+
+  clearTimelineSearch() {
+    this.timelineSearchQuery = '';
+    this.timelineSearchResults = [];
+    this.timelineDateJump = null;
+  }
+
+  jumpToFirstTimelineSearchResult() {
+    const first = this.timelineSearchResults[0];
+    if (first) {
+      this.jumpToTimelineEntry(first);
+    } else if (this.timelineDateJump) {
+      this.jumpToTimelineDate();
+    }
+  }
+
+  jumpToTimelineEntry(entry: TimelineEntry) {
+    this.centerTimelineOnYear(entry.yf);
+    this.timelineSearchQuery = entry.location?.name
+      ? `${entry.label} - ${entry.location.name}`
+      : entry.label;
+    this.timelineSearchResults = [];
+    this.timelineDateJump = null;
+    this.scheduleTimelineTargetUpdate();
+  }
+
+  jumpToTimelineDate() {
+    if (!this.timelineDateJump) return;
+    const dateJump = this.timelineDateJump;
+    this.centerTimelineOnYear(dateJump.yf, false);
+    this.timelineSearchQuery = dateJump.label;
+    this.timelineSearchResults = [];
+    this.timelineDateJump = null;
+    this.scheduleTimelineTargetUpdate();
+  }
+
+  jumpToBibleTimelineAnchor(anchor: BibleTimelineAnchor) {
+    const yearFraction = this.dateService.yearFractionFromInput(anchor.dateLabel);
+    if (!Number.isFinite(yearFraction)) return;
+
+    this.centerTimelineOnYear(yearFraction, false);
+    this.activeSpaceSceneEntryKey = `bible-anchor|${anchor.id}`;
+    this.activeSpaceSceneEntryYear = yearFraction;
+    this.spaceScene?.rotateTo(
+      anchor.location.lon,
+      anchor.location.lat,
+      this.SPACE_SCENE_MIN_TRANSITION_MS,
+      0,
+      yearFraction,
+      anchor.localTimeHours,
+      this.cameraDistanceForBibleAnchor(anchor)
+    );
+  }
+
+  private cameraDistanceForBibleAnchor(anchor: BibleTimelineAnchor): number {
+    return this.SPACE_SCENE_CAMERA_DISTANCES[anchor.viewScale ?? 'global'];
+  }
+
+  private parseTimelineDateJump(query: string): { yf: number; label: string } | null {
+    if (!/\d/.test(query)) return null;
+
+    const parsed = this.dateService.yearParseWithFlag(query);
+    if (!Number.isFinite(parsed.yf)) return null;
+
+    return {
+      yf: parsed.yf,
+      label: parsed.yearOnly
+        ? this.dateService.formatLabelByZoomLevel(parsed.yf, 'Year')
+        : this.dateService.formatLabelByZoomLevel(parsed.yf, 'Day'),
+    };
   }
 
   private onKeyDown = (e: KeyboardEvent) => {
@@ -518,12 +632,14 @@ export class App implements AfterViewInit, OnDestroy {
       this.reanchorGridForCenter(keep);
       this.lastScrollY = target;
 
+      this.syncSpaceSceneToTimelineYear(keep);
       this.redraw();
       return;
     }
 
     this.centerYF = kyClamped;
     this.reanchorGridForCenter(kyClamped);
+    this.syncSpaceSceneToTimelineYear(kyClamped);
 
     if (!(pushingPastTop && s < this.lastScrollY) && !(pushingPastBottom && s > this.lastScrollY)) {
       this.lastScrollY = s;
@@ -637,11 +753,22 @@ export class App implements AfterViewInit, OnDestroy {
     if (anchorToTimeline) {
       const centeredYear = this.currentTimelineYearFraction();
       if (centeredYear != null) {
-        this.spaceScene.setCelestialYearFraction(centeredYear);
+        this.syncSpaceSceneToTimelineYear(centeredYear);
       }
     }
     this.spaceScene.setEarthRotationsPerSecond(0);
-    this.spaceScene.setCloudDriftMultiplier(this.timeProgressionMultiplier);
+    this.spaceScene.setCloudDriftMultiplier(
+      this.isRealtimeProgression() ? 0 : this.timeProgressionMultiplier
+    );
+  }
+
+  private syncSpaceSceneToTimelineYear(yearFraction: number) {
+    if (!this.spaceScene || !Number.isFinite(yearFraction)) return;
+
+    this.spaceScene.setCelestialYearFraction(yearFraction);
+    if (this.timeProgressionMultiplier) {
+      this.timeProgressionAnchorYf = yearFraction;
+    }
   }
 
   private currentTimelineYearFraction(): number | null {
@@ -650,14 +777,16 @@ export class App implements AfterViewInit, OnDestroy {
     return this.yToYearDev(this.CH / 2);
   }
 
-  private startTimelineTimeProgression() {
-    if (this.timeProgressionRafId !== null) return;
+  private startTimelineTimeProgression(initialAnchorYf: number | null = null) {
+    if (this.timeProgressionRafId !== null || this.timeProgressionTimeoutId !== null) return;
+    this.timeProgressionAnchorYf =
+      initialAnchorYf ??
+      this.spaceScene?.getDisplayedCelestialYearFraction() ??
+      this.currentTimelineYearFraction();
     this.lastTimeProgressionMs = performance.now();
     this.lastProgressionTimelineDrawYf = this.currentTimelineYearFraction();
     this.lastProgressionTimelineDrawMs = 0;
-    this.ngZone.runOutsideAngular(() => {
-      this.timeProgressionRafId = requestAnimationFrame(this.timelineTimeProgressionTick);
-    });
+    this.ngZone.runOutsideAngular(() => this.scheduleTimelineTimeProgressionTick());
   }
 
   private stopTimelineTimeProgression() {
@@ -665,30 +794,59 @@ export class App implements AfterViewInit, OnDestroy {
       cancelAnimationFrame(this.timeProgressionRafId);
       this.timeProgressionRafId = null;
     }
+    if (this.timeProgressionTimeoutId !== null) {
+      window.clearTimeout(this.timeProgressionTimeoutId);
+      this.timeProgressionTimeoutId = null;
+    }
     this.lastTimeProgressionMs = null;
+    this.timeProgressionAnchorYf = null;
     this.lastProgressionTimelineDrawYf = null;
     this.lastProgressionTimelineDrawMs = 0;
     this.clearProgressionCanvasTransform();
   }
 
+  private scheduleTimelineTimeProgressionTick() {
+    if (!this.timeProgressionMultiplier) return;
+
+    if (this.isRealtimeProgression()) {
+      this.timeProgressionTimeoutId = window.setTimeout(
+        () => this.timelineTimeProgressionTick(performance.now()),
+        this.REALTIME_PROGRESSION_UPDATE_INTERVAL_MS
+      );
+      return;
+    }
+
+    this.timeProgressionRafId = requestAnimationFrame(this.timelineTimeProgressionTick);
+  }
+
   private timelineTimeProgressionTick = (now: number) => {
     this.timeProgressionRafId = null;
+    this.timeProgressionTimeoutId = null;
     const previous = this.lastTimeProgressionMs ?? now;
     this.lastTimeProgressionMs = now;
 
     if (!this.timeProgressionMultiplier) return;
 
     if (!this._ZOOM_ANIM.active && !this._scrollLocked) {
-      const dtSeconds = Math.min((now - previous) / 1000, 0.1);
+      const dtSeconds = this.isRealtimeProgression()
+        ? Math.min((now - previous) / 1000, 60)
+        : Math.min((now - previous) / 1000, 0.1);
       const yearsPerSecond =
         this.timeProgressionMultiplier /
         (this.TIME_PROGRESSION_DAY_SECONDS * this.dateService.meanYear);
       const currentYear = this.currentTimelineYearFraction();
 
       if (currentYear != null) {
+        const currentAnchorYear = this.timeProgressionAnchorYf ?? currentYear;
         const targetYear = this.clampCenterToData(currentYear + yearsPerSecond * dtSeconds);
+        const appliedDeltaYears = targetYear - currentYear;
+        const targetAnchorYear = currentAnchorYear + appliedDeltaYears;
         this.centerYF = targetYear;
-        this.spaceScene?.setCelestialYearFraction(targetYear);
+        this.timeProgressionAnchorYf = targetAnchorYear;
+        this.spaceScene?.setCelestialYearFraction(targetAnchorYear);
+        if (this.isRealtimeProgression()) {
+          this.spaceScene?.advanceCloudDriftBySimulatedSeconds(dtSeconds);
+        }
         this.applyProgressionCanvasTransform(targetYear);
 
         if (this.shouldRedrawTimelineForProgression(targetYear, now)) {
@@ -700,7 +858,7 @@ export class App implements AfterViewInit, OnDestroy {
       }
     }
 
-    this.timeProgressionRafId = requestAnimationFrame(this.timelineTimeProgressionTick);
+    this.scheduleTimelineTimeProgressionTick();
   };
 
   private shouldRedrawTimelineForProgression(targetYear: number, now: number): boolean {
@@ -911,6 +1069,8 @@ export class App implements AfterViewInit, OnDestroy {
     for (let i = 0; i < this.HUDS.length; i++) {
       const h = this.HUDS[i];
       h.ctx.clearRect(0, 0, this.W, this.H);
+      h.el.classList.toggle('hud-visible', i === this.currentZoomIdx);
+      h.el.classList.toggle('hud-hidden', i !== this.currentZoomIdx);
       h.el.style.opacity = i === this.currentZoomIdx ? '1' : '0';
     }
     const cur = this.HUDS[this.currentZoomIdx];
@@ -968,6 +1128,29 @@ export class App implements AfterViewInit, OnDestroy {
       window.scrollTo(0, sTarget + this.SCROLL_SHIFT);
     }
     this.DID_AUTO_CENTER = true;
+  }
+
+  private centerTimelineOnYear(yearFraction: number, clampToData = true) {
+    const target = clampToData ? this.clampCenterToData(yearFraction) : yearFraction;
+
+    if (this.useVirtualWindow) {
+      this.centerYF = target;
+      this.reanchorGridForCenter(target);
+      this.updateScrollBounds();
+      this.ensureScrollRoomFromBounds();
+      this.recenterToVirtualMid(target);
+    } else {
+      this.centerYF = null;
+      this.updateScrollBounds();
+      this.ensureScrollRoomFromBounds();
+      const yTarget = this.scrollForYear(target) + this.SCROLL_SHIFT;
+      window.scrollTo(0, yTarget);
+      this.clampScroll();
+      this.lastScrollY = window.scrollY || window.pageYOffset || 0;
+    }
+
+    this.redraw();
+    this.updateSpaceSceneTimeSpeed(true);
   }
 
   private drawTimeline() {

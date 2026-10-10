@@ -10,6 +10,8 @@ import {
   AfterViewInit,
   OnChanges,
   SimpleChanges,
+  Output,
+  EventEmitter,
 } from '@angular/core';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { CommonModule } from '@angular/common';
@@ -25,6 +27,10 @@ import {
 } from '../models/bible.model';
 import { TimelineEntry } from '../models/timeline-entry.model';
 import { TimelineSource } from '../data/timeline-points';
+import {
+  BIBLE_TIMELINE_ANCHORS,
+  BibleTimelineAnchor,
+} from '../data/bible-timeline-anchors';
 
 interface BibleSupplementalReference {
   book: string;
@@ -52,6 +58,7 @@ export class BibleViewerComponent implements OnInit, AfterViewInit, OnChanges {
    */
   @Input() initialHighlightReference?: BibleReference;
   @Input() supplementalEntries: TimelineEntry[] = [];
+  @Output() timelineAnchorSelected = new EventEmitter<BibleTimelineAnchor>();
   private initialHighlightTriggered = false;
   @ViewChild('bibleContent', { read: ElementRef }) bibleContentEl?: ElementRef<HTMLElement>;
   @ViewChild('searchResultsContainer', { read: ElementRef })
@@ -69,6 +76,8 @@ export class BibleViewerComponent implements OnInit, AfterViewInit, OnChanges {
   supplementalByVerse = new Map<number, TimelineEntry[]>();
   activeSupplementalVerse: number | null = null;
   activeSupplementalEntries: TimelineEntry[] = [];
+  chapterTimelineAnchors: BibleTimelineAnchor[] = [];
+  private suppressUrlUpdate = false;
 
   constructor(
     private bibleService: BibleService,
@@ -81,10 +90,8 @@ export class BibleViewerComponent implements OnInit, AfterViewInit, OnChanges {
     await Promise.all([this.bibleService.loadBible(), this.originals.load()]);
     this.books.update(() => this.bibleService.getBooks());
     this.loading.update(() => false);
-    // Default to Genesis 1
-    const genesis = this.books().find((b: BibleBook) => b.name === 'Genesis') ?? null;
-    this.selectBook(genesis);
-    this.selectChapter(1);
+
+    this.selectInitialReference();
   }
 
   ngAfterViewInit() {
@@ -119,12 +126,16 @@ export class BibleViewerComponent implements OnInit, AfterViewInit, OnChanges {
     this.lastBookIndex = newBookIdx;
     this.lastChapter = 1;
     this.isFirstLoad = false;
+    this.updateBibleUrl();
     setTimeout(() => (this.pageSlideDirection = null), 600);
   }
 
   onBookChange(event: Event) {
     const select = event.target as HTMLSelectElement;
-    const bookName = select.value;
+    this.onBookNameChange(select.value);
+  }
+
+  onBookNameChange(bookName: string) {
     const book = this.books().find((b) => b.name === bookName) ?? null;
     this.selectBook(book);
   }
@@ -142,6 +153,7 @@ export class BibleViewerComponent implements OnInit, AfterViewInit, OnChanges {
     this.resetScrollToTop();
     this.lastChapter = chapter;
     this.isFirstLoad = false;
+    this.updateBibleUrl();
     setTimeout(() => (this.pageSlideDirection = null), 600);
   }
   resetScrollToTop() {
@@ -155,7 +167,11 @@ export class BibleViewerComponent implements OnInit, AfterViewInit, OnChanges {
 
   onChapterChange(event: Event) {
     const select = event.target as HTMLSelectElement;
-    this.selectChapter(Number(select.value));
+    this.onChapterNumberChange(select.value);
+  }
+
+  onChapterNumberChange(chapter: string | number) {
+    this.selectChapter(Number(chapter));
   }
 
   updateVerses() {
@@ -169,6 +185,101 @@ export class BibleViewerComponent implements OnInit, AfterViewInit, OnChanges {
     const chapter = book.chapters.find((c: BibleChapter) => c.chapter === chapterNum);
     this.verses.update(() => (chapter ? chapter.verses : []));
     this.rebuildSupplementalIndex();
+    this.updateChapterTimelineAnchors();
+  }
+
+  selectTimelineAnchor(anchor: BibleTimelineAnchor) {
+    this.timelineAnchorSelected.emit(anchor);
+  }
+
+  private updateChapterTimelineAnchors() {
+    const book = this.selectedBook();
+    const chapter = this.selectedChapter();
+    if (!book || !chapter) {
+      this.chapterTimelineAnchors = [];
+      return;
+    }
+
+    this.chapterTimelineAnchors = BIBLE_TIMELINE_ANCHORS.filter(
+      (anchor) => anchor.book === book.name && anchor.chapter === chapter
+    );
+  }
+
+  private selectInitialReference() {
+    const books = this.books();
+    const reference = this.bibleReferenceFromUrl();
+    const book =
+      (reference ? this.findBook(reference.book) : null) ??
+      books.find((candidate: BibleBook) => candidate.name === 'Genesis') ??
+      null;
+
+    if (!book) return;
+
+    const chapter = this.clampChapter(book, reference?.chapter ?? 1);
+    const bookIndex = books.findIndex((candidate) => candidate.name === book.name);
+
+    this.suppressUrlUpdate = true;
+    this.selectedBook.update(() => book);
+    this.selectedChapter.update(() => chapter);
+    this.updateVerses();
+    this.hideSupplementalPanel();
+    this.resetScrollToTop();
+    this.lastBookIndex = bookIndex;
+    this.lastChapter = chapter;
+    this.isFirstLoad = false;
+    this.suppressUrlUpdate = false;
+    this.updateBibleUrl();
+  }
+
+  private bibleReferenceFromUrl(): BibleReference | null {
+    const params = new URLSearchParams(window.location.search);
+    const book = params.get('book');
+    const chapterRaw = params.get('chapter');
+    if (!book || !chapterRaw) return null;
+
+    const chapter = Number(chapterRaw);
+    if (!Number.isInteger(chapter) || chapter < 1) return null;
+
+    return { book, chapter };
+  }
+
+  private findBook(nameOrAbbreviation: string): BibleBook | null {
+    const normalized = this.normalizeReferencePart(nameOrAbbreviation);
+    return (
+      this.books().find(
+        (book) =>
+          this.normalizeReferencePart(book.name) === normalized ||
+          this.normalizeReferencePart(book.abbreviation) === normalized
+      ) ?? null
+    );
+  }
+
+  private clampChapter(book: BibleBook, chapter: number): number {
+    const chapters = book.chapters.map((candidate) => candidate.chapter);
+    const min = Math.min(...chapters);
+    const max = Math.max(...chapters);
+    return Math.max(min, Math.min(max, chapter));
+  }
+
+  private updateBibleUrl() {
+    if (this.suppressUrlUpdate) return;
+
+    const book = this.selectedBook();
+    const chapter = this.selectedChapter();
+    if (!book || !chapter) return;
+
+    const url = new URL(window.location.href);
+    url.searchParams.set('book', book.name);
+    url.searchParams.set('chapter', String(chapter));
+    window.history.replaceState(
+      window.history.state,
+      '',
+      `${url.pathname}${url.search}${url.hash}`
+    );
+  }
+
+  private normalizeReferencePart(value: string): string {
+    return value.toLowerCase().replace(/[^a-z0-9]+/g, '');
   }
 
   search() {
@@ -314,6 +425,7 @@ export class BibleViewerComponent implements OnInit, AfterViewInit, OnChanges {
       this.lastChapter = ref.chapter;
     }
     this.isFirstLoad = false;
+    this.updateBibleUrl();
 
     setTimeout(() => {
       this.scrollAndHighlight(ref);

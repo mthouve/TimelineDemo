@@ -13,12 +13,15 @@ designed to stay performant while giving biblical and historical events plausibl
 
 - The sun position is deterministic from the current timeline date and simulates day/night without
   continuously rotating the earth relative to the viewer.
-- The visible starfield follows the earth orientation and annual solar phase so the viewer's
-  perspective remains coherent during time progression.
+- The visible starfield follows the earth orientation and uses only a small seasonal wobble. This
+  preserves a sense of time passing without making the background visibly loop on a yearly cycle.
 - The moon uses a compact Meeus-style geocentric lunar position calculation derived from periodic
   terms for lunar longitude, latitude, and distance.
-- The moon is no longer fixed-distance: its rendered orbit scales from calculated Earth-Moon
-  distance.
+- The scene uses Earth-radius units for celestial movement: Earth radius is `1`, the Moon's rendered
+  radius is about `0.273`, the Moon's center distance comes from calculated Earth-Moon distance in
+  kilometers, and the Sun is placed about one astronomical unit away with its proportional radius.
+  With the current close Earth camera, the Moon and Sun are therefore often out of frame or small by
+  design.
 - The moon's north/south position comes from calculated lunar ecliptic latitude, which is important
   for eclipse alignment.
 - Solar eclipse shadows are represented with a cheap visual approximation: one transparent radial

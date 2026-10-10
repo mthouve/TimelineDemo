@@ -10,6 +10,7 @@ import {
   NgZone,
 } from '@angular/core';
 import * as THREE from 'three';
+import { interpolateNasaSolarEclipsePathSample } from '../../data/astronomy/nasa-solar-eclipses';
 
 type LunarLongitudeDistanceTerm = [
   d: number,
@@ -227,25 +228,35 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
   } | null = null;
   private readonly TWO_PI = Math.PI * 2;
   private readonly DAYS_PER_SOLAR_YEAR = 365.2422;
+  private readonly EARTH_RADIUS_KM = 6371;
   private readonly AXIAL_TILT_RAD = THREE.MathUtils.degToRad(23.44);
-  private readonly SUN_LIGHT_DISTANCE = 650;
-  private readonly SUN_VISUAL_ORBIT_RADIUS = 3.8;
+  private readonly ASTRONOMICAL_UNIT_KM = 149597870.7;
+  private readonly SUN_DISTANCE_EARTH_RADII = this.ASTRONOMICAL_UNIT_KM / this.EARTH_RADIUS_KM;
+  private readonly SUN_RADIUS_EARTH_RADII = 109.2;
   private readonly SUN_CAMERA_HIDE_PAD = 0.2;
-  private readonly MOON_ORBIT_RADIUS = 1.45;
-  private readonly MOON_MEAN_DISTANCE_KM = 385000.56;
-  private readonly MOON_RADIUS = 0.075;
+  private readonly MOON_RADIUS_KM = 1737.4;
+  private readonly MOON_RADIUS_EARTH_RADII = this.MOON_RADIUS_KM / this.EARTH_RADIUS_KM;
   private readonly ECLIPSE_SHADOW_RADIUS = 0.32;
   private readonly ECLIPSE_SHADOW_INNER_ANGLE_RAD = THREE.MathUtils.degToRad(2);
   private readonly ECLIPSE_SHADOW_OUTER_ANGLE_RAD = THREE.MathUtils.degToRad(10);
   private readonly CLOUD_BASE_SPEED_MPH = 8;
   private readonly EARTH_EQUATORIAL_CIRCUMFERENCE_MILES = 24901;
   private readonly SIMULATED_DAY_SECONDS_AT_1X = 15;
+  private readonly CLOUD_DRIFT_ROTATIONS_PER_SIMULATED_SECOND =
+    this.CLOUD_BASE_SPEED_MPH / (this.EARTH_EQUATORIAL_CIRCUMFERENCE_MILES * 60 * 60);
   private readonly CLOUD_DRIFT_ROTATIONS_PER_SECOND_AT_1X =
     (this.CLOUD_BASE_SPEED_MPH * 24) /
     (this.EARTH_EQUATORIAL_CIRCUMFERENCE_MILES * this.SIMULATED_DAY_SECONDS_AT_1X);
   private readonly CLOUD_DRIFT_Y_VARIATION_RADIANS = 0.045;
   private readonly CLOUD_DRIFT_Y_VARIATION_SECONDS = 60;
   private readonly STAR_ANNUAL_AXIS = new THREE.Vector3(0, 1, 0);
+  private readonly STAR_SEASONAL_TILT_AXIS = new THREE.Vector3(1, 0, 0);
+  private readonly STAR_SEASONAL_YAW_RADIANS = THREE.MathUtils.degToRad(6);
+  private readonly STAR_SEASONAL_TILT_RADIANS = THREE.MathUtils.degToRad(3);
+  public readonly GLOBAL_CAMERA_DISTANCE = 3.0;
+  public readonly REGIONAL_CAMERA_DISTANCE = 1.85;
+  public readonly LOCAL_CAMERA_DISTANCE = 1.45;
+  private readonly CAMERA_ZOOM_DURATION_MS = 1200;
   private readonly SHADOW_PLANE_NORMAL = new THREE.Vector3(0, 0, 1);
   private readonly localSunDirection = new THREE.Vector3();
   private readonly worldSunDirection = new THREE.Vector3();
@@ -259,6 +270,7 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
   private readonly markerCameraDirection = new THREE.Vector3();
   private readonly markerNormal = new THREE.Vector3();
   private readonly annualStarRotation = new THREE.Quaternion();
+  private readonly seasonalStarTiltRotation = new THREE.Quaternion();
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointerNdc = new THREE.Vector2();
   private readonly pointerHitLocal = new THREE.Vector3();
@@ -291,9 +303,13 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
   };
 
   private animationFrameId: number | null = null;
+  private idleAnimationTimeoutId: number | null = null;
+  private lastRenderTimeMs = 0;
+  private renderRequested = true;
   private locationMarker: THREE.Sprite | null = null;
   private currentMarkerPosition: { lat: number; lon: number } | null = null;
   private cloudDriftRotationsPerSecond = this.CLOUD_DRIFT_ROTATIONS_PER_SECOND_AT_1X;
+  private cloudDriftRotationRadians = 0;
   private cloudDriftElapsedSeconds = 0;
   private pointerInteraction: {
     pointerId: number;
@@ -313,9 +329,19 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     duration: number;
     startRotation: { x: number; y: number };
     targetRotation: { x: number; y: number };
+    onComplete?: () => void;
+  } | null = null;
+
+  private cameraAnimation: {
+    active: boolean;
+    startTime: number;
+    duration: number;
+    startDistance: number;
+    targetDistance: number;
   } | null = null;
 
   private resizeObserver: ResizeObserver | null = null;
+  private readonly IDLE_RENDER_INTERVAL_MS = 60 * 1000;
 
   ngAfterViewInit(): void {
     this.initScene();
@@ -340,6 +366,9 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     if (this.animationFrameId !== null) {
       cancelAnimationFrame(this.animationFrameId);
     }
+    if (this.idleAnimationTimeoutId !== null) {
+      window.clearTimeout(this.idleAnimationTimeoutId);
+    }
 
     if (this.resizeObserver) {
       this.resizeObserver.disconnect();
@@ -358,6 +387,7 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     this.waterSpecMaterial?.dispose();
     this.cloudsMaterial?.dispose();
     this.sunSpriteMaterial?.dispose();
+    this.atmosphereMaterial?.dispose();
     this.moonGeometry?.dispose();
     this.moonMaterial?.dispose();
     this.eclipseShadowGeometry?.dispose();
@@ -379,11 +409,15 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     durationMs = 2000,
     elapsedYears = 0,
     targetYearFraction?: number,
-    targetLocalTimeHours?: number
+    targetLocalTimeHours?: number,
+    followUpCameraDistance?: number
   ): void {
     if (!this.earthGroup) return;
 
-    this.startRotationTo(longitude, latitude, durationMs);
+    this.startRotationTo(longitude, latitude, durationMs, () => {
+      if (followUpCameraDistance == null) return;
+      this.zoomCameraTo(followUpCameraDistance);
+    });
 
     if (targetYearFraction != null && Number.isFinite(targetYearFraction)) {
       this.startTimeTransition(
@@ -405,12 +439,29 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     this.currentMarkerPosition = { lat: latitude, lon: longitude };
   }
 
+  public zoomCameraTo(distance: number, durationMs = this.CAMERA_ZOOM_DURATION_MS): void {
+    if (!this.camera || !Number.isFinite(distance)) return;
+
+    const targetDistance = THREE.MathUtils.clamp(distance, 1.25, this.GLOBAL_CAMERA_DISTANCE);
+    if (Math.abs(this.camera.position.z - targetDistance) < 0.001) return;
+
+    this.cameraAnimation = {
+      active: true,
+      startTime: performance.now(),
+      duration: Math.max(1, durationMs),
+      startDistance: this.camera.position.z,
+      targetDistance,
+    };
+    this.requestRender();
+  }
+
   /**
    * Public API: Set location marker opacity
    */
   public setMarkerOpacity(opacity: number): void {
     if (this.locationMarker && this.locationMarker.material) {
       (this.locationMarker.material as THREE.SpriteMaterial).opacity = opacity;
+      this.requestRender();
     }
   }
 
@@ -423,12 +474,23 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     if (this.earthRotationsPerSecond === 0) {
       this.timeAnimation = null;
     }
+    this.requestRender();
   }
 
   public setCloudDriftMultiplier(multiplier: number): void {
     const safeMultiplier = Number.isFinite(multiplier) ? Math.max(0, multiplier) : 0;
     this.cloudDriftRotationsPerSecond =
       safeMultiplier * this.CLOUD_DRIFT_ROTATIONS_PER_SECOND_AT_1X;
+    this.requestRender();
+  }
+
+  public advanceCloudDriftBySimulatedSeconds(deltaSeconds: number): void {
+    if (!Number.isFinite(deltaSeconds) || deltaSeconds <= 0) return;
+    this.advanceCloudDriftByRotations(
+      deltaSeconds * this.CLOUD_DRIFT_ROTATIONS_PER_SIMULATED_SECOND,
+      deltaSeconds
+    );
+    this.requestRender();
   }
 
   public setCelestialYearFraction(yearFraction: number): void {
@@ -436,6 +498,25 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     this.timeAnimation = null;
     this.setCelestialPhasesFromYearFraction(yearFraction);
     this.applySunOrbit();
+    this.requestRender();
+  }
+
+  public getDisplayedCelestialYearFraction(): number {
+    const dayProgress = this.normalizeRadians(this.sunOrbitPhase) / this.TWO_PI;
+    const currentDayCycle = this.currentCelestialYearFraction * this.DAYS_PER_SOLAR_YEAR;
+    const cycle = Math.floor(currentDayCycle);
+    const candidates = [
+      (cycle - 1 + dayProgress) / this.DAYS_PER_SOLAR_YEAR,
+      (cycle + dayProgress) / this.DAYS_PER_SOLAR_YEAR,
+      (cycle + 1 + dayProgress) / this.DAYS_PER_SOLAR_YEAR,
+    ];
+
+    return candidates.reduce((closest, candidate) =>
+      Math.abs(candidate - this.currentCelestialYearFraction) <
+      Math.abs(closest - this.currentCelestialYearFraction)
+        ? candidate
+        : closest
+    );
   }
 
   private registerPointerInteraction(): void {
@@ -468,6 +549,7 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
       startRotationY: this.earthGroup.rotation.y,
       dragging: false,
     };
+    this.requestRender();
     document.body.style.cursor = 'grabbing';
   };
 
@@ -486,6 +568,7 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
 
     interaction.dragging = true;
     this.rotationAnimation = null;
+    this.cameraAnimation = null;
 
     const sensitivity = 0.006;
     this.earthGroup.rotation.y = interaction.startRotationY + dx * sensitivity;
@@ -495,6 +578,7 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
       Math.PI / 2
     );
     this.applySunOrbit();
+    this.requestRender();
   };
 
   private handlePointerUp = (event: PointerEvent): void => {
@@ -512,6 +596,7 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
 
     const target = this.latLonFromLocalPoint(this.pointerHitLocal);
     this.startRotationTo(target.lon, target.lat, 700);
+    this.requestRender();
   };
 
   private handlePointerCancel = (event: PointerEvent): void => {
@@ -519,6 +604,7 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     if (!interaction || event.pointerId !== interaction.pointerId) return;
     this.pointerInteraction = null;
     document.body.style.cursor = '';
+    this.requestRender();
   };
 
   private pointerHitsEarth(clientX: number, clientY: number): boolean {
@@ -565,7 +651,12 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     return THREE.MathUtils.euclideanModulo(longitude + 180, 360) - 180;
   }
 
-  private startRotationTo(longitude: number, latitude: number, durationMs: number): void {
+  private startRotationTo(
+    longitude: number,
+    latitude: number,
+    durationMs: number,
+    onComplete?: () => void
+  ): void {
     if (!this.earthGroup) return;
 
     // Spherical coordinates: latitude (phi), longitude (theta)
@@ -583,7 +674,9 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
         y: this.earthGroup.rotation.y,
       },
       targetRotation: { x: targetX, y: targetY },
+      onComplete,
     };
+    this.requestRender();
   }
 
   private initScene(): void {
@@ -595,8 +688,8 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     this.scene = new THREE.Scene();
 
     // Camera
-    this.camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 1000);
-    this.camera.position.set(0, 0, 3.0); // Center camera on Earth
+    this.camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 30000);
+    this.camera.position.set(0, 0, this.GLOBAL_CAMERA_DISTANCE); // Center camera on Earth
 
     // Renderer
     this.renderer = new THREE.WebGLRenderer({
@@ -626,8 +719,9 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     this.scene.add(hemiLight);
 
     // Sun light moves around the Earth to simulate day/night without rotating the globe.
-    this.sunLight = new THREE.PointLight(0xffffff, 250000.0);
-    this.sunLight.position.set(0, 80, this.SUN_LIGHT_DISTANCE);
+    this.sunLight = new THREE.PointLight(0xffffff, 0.8);
+    this.sunLight.decay = 0;
+    this.sunLight.position.set(0, 80, this.SUN_DISTANCE_EARTH_RADII);
     this.sunLight.castShadow = true;
     this.scene.add(this.sunLight);
     this.createSunSprite();
@@ -659,6 +753,7 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
         this.starSphere.renderOrder = -10;
         this.starSphere.visible = true;
         this.scene.add(this.starSphere);
+        this.requestRender();
       },
       undefined,
       (err) => {
@@ -780,11 +875,11 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     this.cloudsGroup.add(this.cloudsMesh);
     this.earthGroup.add(this.cloudsGroup);
 
-    // Add atmosphere: blue at edge, clear at center (limb-brightened)
+    // Add atmosphere: mostly clear at center, bluer through the longer limb path.
     this.atmosphereMaterial = new THREE.ShaderMaterial({
       uniforms: {
-        color: { value: new THREE.Color(0x4db8ff) },
-        intensity: { value: 0.6 },
+        color: { value: new THREE.Color(0x38a9ff) },
+        intensity: { value: 0.72 },
         viewVector: { value: new THREE.Vector3(0, 0, 1) },
         sunDir: { value: new THREE.Vector3(0.5, 0.5, 0.5).normalize() },
       },
@@ -796,9 +891,9 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
           void main() {
             vec3 vNormal = normalize(normalMatrix * normal);
             float viewDot = dot(vNormal, normalize(viewVector));
-            vLimb = 1.0 - pow(abs(viewDot), 0.8); // max at limb, min at center
-            vSun = max(0.3, dot(vNormal, normalize(sunDir)));
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 0.99);
+            vLimb = 1.0 - clamp(viewDot, 0.0, 1.0);
+            vSun = clamp(dot(vNormal, normalize(sunDir)), 0.0, 1.0);
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
           }
         `,
       fragmentShader: `
@@ -807,11 +902,10 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
           varying float vLimb;
           varying float vSun;
           void main() {
-            // Fade in from center, fade out at edge
-            float fadeIn = smoothstep(0.1, 0.4, vLimb);
-            float fadeOut = 1.0 - smoothstep(0.3, 0.35, vLimb);
-            float sunMod = pow(vSun, 1.0); // more opaque where sun shines
-            float alpha = fadeIn * fadeOut * intensity * sunMod;
+            float limbBand = smoothstep(0.22, 0.76, vLimb);
+            float fadeBeforeSilhouette = 1.0 - smoothstep(0.68, 0.96, vLimb);
+            float daylight = smoothstep(-0.18, 0.28, vSun);
+            float alpha = pow(limbBand, 1.1) * fadeBeforeSilhouette * daylight * intensity;
             gl_FragColor = vec4(color, alpha);
           }
         `,
@@ -821,11 +915,13 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
       depthWrite: false,
     });
     this.atmosphereMesh = new THREE.Mesh(this.earthGeometry, this.atmosphereMaterial);
-    this.atmosphereMesh.scale.setScalar(1.05);
+    this.atmosphereMesh.scale.setScalar(1.01);
     this.atmosphereMesh.renderOrder = 30;
     this.atmosphereMesh.visible = false;
     this.earthGroup.add(this.atmosphereMesh);
+
     this.scene.add(this.earthGroup);
+    this.requestRender();
   }
 
   private markEarthTextureReady(texture: keyof typeof this.earthTextureReady): void {
@@ -839,15 +935,17 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
       if (this.waterDiffuseMesh) this.waterDiffuseMesh.visible = true;
       if (this.atmosphereMesh) this.atmosphereMesh.visible = true;
     }
+    this.requestRender();
   }
 
   private createMoon(): void {
-    this.moonGeometry = new THREE.SphereGeometry(this.MOON_RADIUS, 24, 12);
+    this.moonGeometry = new THREE.SphereGeometry(this.MOON_RADIUS_EARTH_RADII, 24, 12);
     this.moonTexture = new THREE.TextureLoader().load('assets/moon_1k.jpg', (texture) => {
       if ('colorSpace' in texture) {
         (texture as any).colorSpace = THREE.SRGBColorSpace;
       }
       texture.needsUpdate = true;
+      this.requestRender();
     });
     this.moonMaterial = new THREE.MeshPhongMaterial({
       map: this.moonTexture,
@@ -1065,11 +1163,15 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
       this.worldSunDirection.applyQuaternion(this.earthGroup.quaternion);
     }
 
-    this.sunLight.position.copy(this.worldSunDirection).multiplyScalar(this.SUN_LIGHT_DISTANCE);
+    this.sunLight.position.copy(this.worldSunDirection).multiplyScalar(this.SUN_DISTANCE_EARTH_RADII);
 
     if (this.starSphere) {
-      this.annualStarRotation.setFromAxisAngle(this.STAR_ANNUAL_AXIS, -this.sunYearPhase);
+      const seasonalYaw = Math.sin(this.sunYearPhase) * this.STAR_SEASONAL_YAW_RADIANS;
+      const seasonalTilt = Math.cos(this.sunYearPhase) * this.STAR_SEASONAL_TILT_RADIANS;
+      this.annualStarRotation.setFromAxisAngle(this.STAR_ANNUAL_AXIS, seasonalYaw);
+      this.seasonalStarTiltRotation.setFromAxisAngle(this.STAR_SEASONAL_TILT_AXIS, seasonalTilt);
       this.starSphere.quaternion.copy(this.annualStarRotation);
+      this.starSphere.quaternion.multiply(this.seasonalStarTiltRotation);
       if (this.earthGroup) {
         this.starSphere.quaternion.premultiply(this.earthGroup.quaternion);
       }
@@ -1081,13 +1183,10 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
 
     const visualPosition = this.visualSunPosition
       .copy(this.worldSunDirection)
-      .multiplyScalar(this.SUN_VISUAL_ORBIT_RADIUS);
+      .multiplyScalar(this.SUN_DISTANCE_EARTH_RADII);
 
     this.sunSprite.position.copy(visualPosition);
-
-    const viewerSideAmount = THREE.MathUtils.clamp((this.worldSunDirection.z + 1) / 2, 0, 1);
-    const sunScale = THREE.MathUtils.lerp(0.45, 2.8, viewerSideAmount);
-    this.sunSprite.scale.set(sunScale, sunScale, 1);
+    this.sunSprite.scale.setScalar(this.SUN_RADIUS_EARTH_RADII * 2);
 
     // When the sun reaches the viewer side, it passes behind the camera and out of frame.
     this.sunSprite.visible = visualPosition.z < this.camera.position.z - this.SUN_CAMERA_HIDE_PAD;
@@ -1100,7 +1199,7 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     const moonPosition = this.lunarPositionFromDayNumber(dayNumber);
     const sunLongitude = this.solarLongitudeFromDayNumber(dayNumber);
     const elongation = this.normalizeRadians(moonPosition.longitude - sunLongitude);
-    const distanceScale = moonPosition.distanceKm / this.MOON_MEAN_DISTANCE_KM;
+    const distanceEarthRadii = moonPosition.distanceKm / this.EARTH_RADIUS_KM;
 
     this.localMoonDirection
       .copy(this.localSunDirection)
@@ -1115,8 +1214,8 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
 
     this.moonMesh.position
       .copy(this.worldMoonDirection)
-      .multiplyScalar(this.MOON_ORBIT_RADIUS * distanceScale);
-    this.moonMesh.visible = this.worldMoonDirection.z > -0.92;
+      .multiplyScalar(distanceEarthRadii);
+    this.moonMesh.visible = this.worldMoonDirection.z > -0.95;
     this.applyEclipseShadow();
   }
 
@@ -1238,6 +1337,8 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
   private applyEclipseShadow(): void {
     if (!this.eclipseShadowMesh || !this.eclipseShadowMaterial) return;
 
+    if (this.applyNasaEclipseShadow()) return;
+
     const alignmentAngle = this.localSunDirection.angleTo(this.localMoonDirection);
     if (alignmentAngle > this.ECLIPSE_SHADOW_OUTER_ANGLE_RAD) {
       this.eclipseShadowMesh.visible = false;
@@ -1263,13 +1364,127 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     this.eclipseShadowMaterial.opacity = opacity;
   }
 
+  private applyNasaEclipseShadow(): boolean {
+    const shadowSample = this.interpolateNasaEclipseShadowSample(this.currentCelestialYearFraction);
+    if (!shadowSample) return false;
+
+    this.localShadowDirection.copy(
+      this.localDirectionFromLatLon(shadowSample.location.lat, shadowSample.location.lon)
+    );
+    this.eclipseShadowMesh!.position.copy(this.localShadowDirection).multiplyScalar(1.012);
+    this.eclipseShadowMesh!.quaternion.setFromUnitVectors(
+      this.SHADOW_PLANE_NORMAL,
+      this.localShadowDirection
+    );
+    this.eclipseShadowMesh!.scale.setScalar(shadowSample.radius);
+    this.eclipseShadowMesh!.visible = true;
+    this.eclipseShadowMaterial!.opacity = shadowSample.opacity;
+    return true;
+  }
+
+  private interpolateNasaEclipseShadowSample(yearFraction: number): {
+    location: { lat: number; lon: number };
+    radius: number;
+    opacity: number;
+  } | null {
+    const dateTime = this.gregorianDateTimeFromYearFraction(yearFraction);
+    const dateKey = this.dateKey(dateTime.year, dateTime.month, dateTime.day);
+    const sample = interpolateNasaSolarEclipsePathSample(dateKey, dateTime.minutesOfDay);
+    if (!sample) return null;
+
+    return {
+      location: sample.location,
+      radius: THREE.MathUtils.clamp(
+        sample.pathWidthKm / (this.EARTH_RADIUS_KM * Math.PI),
+        0.04,
+        0.16
+      ),
+      opacity: 0.95,
+    };
+  }
+
+  private gregorianDateTimeFromYearFraction(yearFraction: number): {
+    year: number;
+    month: number;
+    day: number;
+    minutesOfDay: number;
+  } {
+    const year = Math.floor(yearFraction);
+    const yearProgress = yearFraction - year;
+    const totalDays = THREE.MathUtils.clamp(
+      yearProgress * this.daysInGregorianYear(year),
+      0,
+      this.daysInGregorianYear(year)
+    );
+    let dayOfYear = Math.floor(totalDays);
+    const minutesOfDay = THREE.MathUtils.clamp(
+      Math.floor((totalDays - dayOfYear) * 24 * 60),
+      0,
+      1439
+    );
+    const daysByMonth = [
+      31,
+      this.isGregorianLeapYear(year) ? 29 : 28,
+      31,
+      30,
+      31,
+      30,
+      31,
+      31,
+      30,
+      31,
+      30,
+      31,
+    ];
+    let month = 1;
+    for (const days of daysByMonth) {
+      if (dayOfYear < days) break;
+      dayOfYear -= days;
+      month++;
+    }
+
+    return { year, month, day: dayOfYear + 1, minutesOfDay };
+  }
+
+  private localDirectionFromLatLon(latitude: number, longitude: number): THREE.Vector3 {
+    const lat = THREE.MathUtils.degToRad(latitude);
+    const lon = THREE.MathUtils.degToRad(longitude + 90);
+    const radiusAtLatitude = Math.cos(lat);
+    return new THREE.Vector3(
+      Math.sin(lon) * radiusAtLatitude,
+      Math.sin(lat),
+      Math.cos(lon) * radiusAtLatitude
+    ).normalize();
+  }
+
+  private dateKey(year: number, month: number, day: number): string {
+    return `${year}-${this.pad2(month)}-${this.pad2(day)}`;
+  }
+
+  private pad2(value: number): string {
+    return String(value).padStart(2, '0');
+  }
+
   private advanceCloudDrift(deltaSeconds: number): void {
     if (!this.cloudsGroup) return;
     if (this.cloudDriftRotationsPerSecond <= 0 || deltaSeconds <= 0) return;
 
-    this.cloudDriftElapsedSeconds += deltaSeconds;
-    const driftRotations = this.cloudDriftElapsedSeconds * this.cloudDriftRotationsPerSecond;
-    this.cloudsGroup.rotation.y = driftRotations * this.TWO_PI;
+    this.advanceCloudDriftByRotations(
+      this.cloudDriftRotationsPerSecond * deltaSeconds,
+      deltaSeconds
+    );
+  }
+
+  private advanceCloudDriftByRotations(deltaRotations: number, elapsedSeconds: number): void {
+    if (!this.cloudsGroup) return;
+    if (!Number.isFinite(deltaRotations) || !Number.isFinite(elapsedSeconds)) return;
+
+    this.cloudDriftElapsedSeconds += elapsedSeconds;
+    this.cloudDriftRotationRadians = THREE.MathUtils.euclideanModulo(
+      this.cloudDriftRotationRadians + deltaRotations * this.TWO_PI,
+      this.TWO_PI
+    );
+    this.cloudsGroup.rotation.y = this.cloudDriftRotationRadians;
     this.cloudsGroup.rotation.x =
       Math.sin((this.cloudDriftElapsedSeconds / this.CLOUD_DRIFT_Y_VARIATION_SECONDS) * this.TWO_PI) *
       this.CLOUD_DRIFT_Y_VARIATION_RADIANS;
@@ -1282,13 +1497,14 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
 
   // Update the viewVector uniform for the atmosphere each frame
   private animate = (): void => {
-    this.animationFrameId = requestAnimationFrame(this.animate);
+    this.animationFrameId = null;
 
     const now = performance.now();
     const dtSec = this.lastTimeMs == null ? 0 : (now - this.lastTimeMs) / 1000;
     this.lastTimeMs = now;
 
     const clampedDt = Math.min(dtSec, 0.1);
+    const sceneWasActive = this.hasActiveSceneMotion();
     if (!this.updateTimeTransition(now)) {
       this.updateSunOrbit(clampedDt);
     }
@@ -1307,6 +1523,7 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
       earthRotatedThisFrame = true;
       if (t >= 1) {
         anim.active = false;
+        anim.onComplete?.();
       }
     }
 
@@ -1314,7 +1531,33 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
       this.applySunOrbit();
     }
 
+    if (this.cameraAnimation?.active) {
+      const anim = this.cameraAnimation;
+      const elapsed = now - anim.startTime;
+      const t = Math.min(1, elapsed / anim.duration);
+      const eased = this.easeInOutCubic(t);
+      this.camera.position.z =
+        anim.startDistance + (anim.targetDistance - anim.startDistance) * eased;
+      this.camera.updateProjectionMatrix();
+
+      if (t >= 1) {
+        this.camera.position.z = anim.targetDistance;
+        anim.active = false;
+      }
+    }
+
     this.advanceCloudDrift(clampedDt);
+    const sceneActive = this.hasActiveSceneMotion();
+    const shouldRender =
+      sceneWasActive ||
+      sceneActive ||
+      this.renderRequested ||
+      now - this.lastRenderTimeMs >= this.IDLE_RENDER_INTERVAL_MS;
+
+    if (!shouldRender) {
+      this.scheduleNextAnimationFrame(false);
+      return;
+    }
 
     // Update marker position
     this.updateMarkerPosition();
@@ -1330,7 +1573,44 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     }
 
     this.renderer.render(this.scene, this.camera);
+    this.lastRenderTimeMs = now;
+    this.renderRequested = false;
+    this.scheduleNextAnimationFrame(sceneActive);
   };
+
+  private hasActiveSceneMotion(): boolean {
+    return (
+      this.earthRotationsPerSecond > 0 ||
+      this.cloudDriftRotationsPerSecond > 0 ||
+      !!this.timeAnimation?.active ||
+      !!this.rotationAnimation?.active ||
+      !!this.cameraAnimation?.active ||
+      !!this.pointerInteraction?.dragging
+    );
+  }
+
+  private requestRender(): void {
+    this.renderRequested = true;
+    if (this.idleAnimationTimeoutId !== null) {
+      window.clearTimeout(this.idleAnimationTimeoutId);
+      this.idleAnimationTimeoutId = null;
+      this.scheduleNextAnimationFrame(true);
+    }
+  }
+
+  private scheduleNextAnimationFrame(active: boolean): void {
+    if (this.animationFrameId !== null || this.idleAnimationTimeoutId !== null) return;
+
+    if (active) {
+      this.animationFrameId = requestAnimationFrame(this.animate);
+      return;
+    }
+
+    this.idleAnimationTimeoutId = window.setTimeout(() => {
+      this.idleAnimationTimeoutId = null;
+      this.animationFrameId = requestAnimationFrame(this.animate);
+    }, this.IDLE_RENDER_INTERVAL_MS);
+  }
 
   private createMarker(): void {
     // Marker: solid red inner circle with red blur, not affected by lighting
@@ -1445,5 +1725,6 @@ export class SpaceSceneComponent implements AfterViewInit, OnDestroy {
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height);
+    this.requestRender();
   }
 }

@@ -105,6 +105,45 @@
   flex: 0 1 58%;
 }
 
+.chapter-timeline-anchors {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.chapter-timeline-anchor {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 7px 9px;
+  text-align: left;
+  color: rgba(255, 220, 170, 0.94);
+  background: #000;
+  border: 1px solid rgba(255, 150, 60, 0.38);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.chapter-timeline-anchor:hover,
+.chapter-timeline-anchor:focus-visible {
+  border-color: rgba(255, 190, 110, 0.88);
+  background: rgba(40, 18, 4, 0.96);
+}
+
+.anchor-title {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.anchor-meta {
+  overflow: hidden;
+  color: rgba(255, 200, 145, 0.72);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .bible-verse {
   margin-bottom: 0.8em;
   line-height: 1.6;

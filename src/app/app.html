@@ -1,6 +1,9 @@
 <div class="split-view">
   <!-- Bible panel (left) -->
-  <app-bible-viewer [supplementalEntries]="bibleSupplementalEntries" />
+  <app-bible-viewer
+    [supplementalEntries]="bibleSupplementalEntries"
+    (timelineAnchorSelected)="jumpToBibleTimelineAnchor($event)"
+  />
 
   <!-- Timeline panel (right) -->
   <div class="timeline-panel">
@@ -16,6 +19,50 @@
 
     <!-- Settings UI (contains zoom slider) -->
     <app-settings-control class="timeline-settings">
+      <div class="timeline-search-control">
+        <label for="timelineSearch">Go to</label>
+        <div class="timeline-search-row">
+          <input
+            id="timelineSearch"
+            type="search"
+            placeholder="Search events, places, or dates"
+            [value]="timelineSearchQuery"
+            (input)="onTimelineSearchInput($event)"
+            (keydown.enter)="jumpToFirstTimelineSearchResult()"
+          />
+          <button
+            type="button"
+            class="timeline-search-clear"
+            *ngIf="timelineSearchQuery"
+            (click)="clearTimelineSearch()"
+            title="Clear search"
+          >
+            &times;
+          </button>
+        </div>
+        <div class="timeline-search-results" *ngIf="timelineSearchResults.length">
+          <button
+            type="button"
+            class="timeline-search-result"
+            *ngFor="let result of timelineSearchResults"
+            (click)="jumpToTimelineEntry(result)"
+          >
+            <span class="timeline-search-result-label">{{ result.label }}</span>
+            <span class="timeline-search-result-title">
+              {{ result.location?.name || result.when }}
+            </span>
+          </button>
+        </div>
+        <button
+          type="button"
+          class="timeline-search-result timeline-date-result"
+          *ngIf="timelineDateJump && !timelineSearchResults.length"
+          (click)="jumpToTimelineDate()"
+        >
+          <span class="timeline-search-result-label">Jump to date</span>
+          <span class="timeline-search-result-title">{{ timelineDateJump.label }}</span>
+        </button>
+      </div>
       <app-zoom-control
         [min]="0"
         [max]="zoomLevels.length - 1"

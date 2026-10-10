@@ -1,4 +1,8 @@
-import { findNasaSolarEclipseByDate, NASA_SOLAR_ECLIPSES } from './nasa-solar-eclipses';
+import {
+  findNasaSolarEclipseByDate,
+  interpolateNasaSolarEclipsePathSample,
+  NASA_SOLAR_ECLIPSES,
+} from './nasa-solar-eclipses';
 
 describe('NASA solar eclipse reference data', () => {
   it('includes the 2027 Aug 02 total solar eclipse reference', () => {
@@ -64,6 +68,21 @@ describe('NASA solar eclipse reference data', () => {
       0.0000038,
     ]);
   });
+
+  it('interpolates the 2027 Aug 02 eclipse path along northern Africa', () => {
+    const sample = interpolateNasaSolarEclipsePathSample('2027-08-02', 9 * 60 + 50);
+
+    expect(sample).toBeTruthy();
+    expect(sample!.location.lat).toBeGreaterThan(28);
+    expect(sample!.location.lat).toBeLessThan(30);
+    expect(sample!.location.lon).toBeGreaterThan(27);
+    expect(sample!.location.lon).toBeLessThan(28);
+    expect(sample!.pathWidthKm).toBeCloseTo(256, 0);
+  });
+
+  it('does not expose a NASA eclipse path outside the sampled event time', () => {
+    expect(interpolateNasaSolarEclipsePathSample('2027-08-02', 3 * 60)).toBeNull();
+  });
 });
 
 function minutesFromUt(timeUt: string): number {
@@ -87,4 +106,3 @@ function greatCircleDistanceKm(a: { lat: number; lon: number }, b: { lat: number
 function degreesToRadians(degrees: number): number {
   return (degrees * Math.PI) / 180;
 }
-

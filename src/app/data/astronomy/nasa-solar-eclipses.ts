@@ -62,6 +62,12 @@ export interface NasaSolarEclipseReference {
   visibilitySummary: string;
 }
 
+export interface InterpolatedNasaSolarEclipsePathSample {
+  eclipse: NasaSolarEclipseReference;
+  location: GeoPoint;
+  pathWidthKm: number;
+}
+
 export const NASA_SOLAR_ECLIPSES: NasaSolarEclipseReference[] = [
   {
     id: 'nasa-se-2027-08-02-total',
@@ -223,3 +229,48 @@ export function findNasaSolarEclipseByDate(date: string): NasaSolarEclipseRefere
   return NASA_SOLAR_ECLIPSES.find((eclipse) => eclipse.date === date);
 }
 
+export function interpolateNasaSolarEclipsePathSample(
+  date: string,
+  minutesOfDayUt: number
+): InterpolatedNasaSolarEclipsePathSample | null {
+  const eclipse = findNasaSolarEclipseByDate(date);
+  if (!eclipse || eclipse.centralLineSamples.length < 2) return null;
+
+  const samples = eclipse.centralLineSamples;
+  const firstMinutes = minutesFromUt(samples[0].timeUt);
+  const lastMinutes = minutesFromUt(samples[samples.length - 1].timeUt);
+  if (minutesOfDayUt < firstMinutes || minutesOfDayUt > lastMinutes) return null;
+
+  for (let i = 1; i < samples.length; i++) {
+    const previous = samples[i - 1];
+    const current = samples[i];
+    const previousMinutes = minutesFromUt(previous.timeUt);
+    const currentMinutes = minutesFromUt(current.timeUt);
+    if (minutesOfDayUt > currentMinutes) continue;
+
+    const t = clamp01((minutesOfDayUt - previousMinutes) / (currentMinutes - previousMinutes));
+    return {
+      eclipse,
+      location: {
+        lat: lerp(previous.centralLine.lat, current.centralLine.lat, t),
+        lon: lerp(previous.centralLine.lon, current.centralLine.lon, t),
+      },
+      pathWidthKm: lerp(previous.pathWidthKm, current.pathWidthKm, t),
+    };
+  }
+
+  return null;
+}
+
+function minutesFromUt(timeUt: string): number {
+  const [hours, minutes] = timeUt.split(':').map(Number);
+  return hours * 60 + minutes;
+}
+
+function lerp(start: number, end: number, t: number): number {
+  return start + (end - start) * t;
+}
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}

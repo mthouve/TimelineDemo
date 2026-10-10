@@ -41,4 +41,23 @@ describe('TimelineEntryService', () => {
       expect(Math.abs(entry.yf - centerYf)).toBeLessThanOrEqual(radiusYears);
     }
   });
+
+  it('should search timeline entries by location and description text', () => {
+    const results = service.searchEntries('megiddo josiah');
+
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0].location?.name).toContain('Megiddo');
+  });
+
+  it('should include Bible timeline anchors in the indexed timeline range', () => {
+    const results = service.searchEntries('Abram Haran');
+
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0].label).toBe('2091 B.C.E.');
+    expect(results[0].location?.name).toBe('Haran region');
+  });
+
+  it('should return no search results for unrelated terms', () => {
+    expect(service.searchEntries('notarealtimelineevent')).toEqual([]);
+  });
 });

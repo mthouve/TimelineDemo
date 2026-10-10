@@ -1,9 +1,16 @@
 <div class="bible-viewer">
   <div class="bible-header">
-    <select [value]="selectedBook()?.name" (change)="onBookChange($event)">
+    <select
+      [ngModel]="selectedBook()?.name"
+      (ngModelChange)="onBookNameChange($event)"
+    >
       <option *ngFor="let book of books()" [value]="book.name">{{ book.name }}</option>
     </select>
-    <select *ngIf="selectedBook()" [value]="selectedChapter()" (change)="onChapterChange($event)">
+    <select
+      *ngIf="selectedBook()"
+      [ngModel]="selectedChapter()"
+      (ngModelChange)="onChapterNumberChange($event)"
+    >
       <option *ngFor="let chapter of selectedBook()?.chapters" [value]="chapter.chapter">
         {{ chapter.chapter }}
       </option>
@@ -24,6 +31,23 @@
     #bibleContent
     (wheel)="onWheel($event, bibleContent)"
   >
+    <div class="chapter-timeline-anchors" *ngIf="chapterTimelineAnchors.length">
+      <button
+        *ngFor="let anchor of chapterTimelineAnchors"
+        type="button"
+        class="chapter-timeline-anchor"
+        (click)="selectTimelineAnchor(anchor)"
+      >
+        <span class="anchor-title">{{ anchor.title }}</span>
+        <span class="anchor-meta">
+          c. {{ anchor.dateLabel }}
+          <ng-container *ngIf="anchor.uncertaintyYears">
+            +/- {{ anchor.uncertaintyYears }} yrs
+          </ng-container>
+          - {{ anchor.location.name }}
+        </span>
+      </button>
+    </div>
     <div
       class="bible-content-inner"
       [ngClass]="{
