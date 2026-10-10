@@ -8,6 +8,10 @@ The long-term goal is a searchable biblical archive through time and space: sele
 event should move the timeline to the approximate date and rotate the globe toward the approximate
 place.
 
+> "The heavens declare the glory of God; and the firmament sheweth his handywork."
+>
+> Psalm 19:1, KJV
+
 ## Project Status
 
 TimelineDemo is still a proof of concept. The current app demonstrates the core interaction model:
@@ -23,6 +27,15 @@ Today, the prototype includes:
 - a Three.js earth scene with clouds, atmosphere, sun, moon, starfield, and location markers;
 - deterministic time progression that can move the celestial scene and timeline together;
 - early NASA eclipse reference data for validating future eclipse-path calculations.
+
+## Tech Stack
+
+- Angular for the application shell, component structure, routing state, and UI controls.
+- TypeScript for application logic, timeline indexing, astronomy calculations, and rendering state.
+- Three.js for the interactive earth, sun, moon, cloud layer, starfield, lighting, and markers.
+- HTML canvas for the vertical timeline HUD and zoom-level tick rendering.
+- Static project data for the current proof-of-concept Bible timeline anchors, timeline entries, and
+  NASA eclipse reference fixtures.
 
 ## Live Application Screenshot
 
@@ -79,6 +92,25 @@ The first imported reference is NASA's Total Solar Eclipse of 2027 Aug 02. It in
 This reference intentionally confirms that the total path is near North Africa, Egypt, the Red Sea
 region, Yemen, Somalia, and the Indian Ocean. Israel is outside the totality path but within the
 broader partial-visibility region.
+
+## Roadmap
+
+1. Strengthen the proof of concept by making the Bible, timeline, globe, and search interactions
+   feel coherent and reliable.
+2. Harden the event data model with explicit support for approximate dates, date ranges,
+   uncertainty, locations, regions, routes, and source confidence.
+3. Move large timeline and archive data into a searchable database/API once static frontend data is
+   no longer enough.
+4. Improve the astronomy layer with stronger calendar handling, validated eclipse fixtures, and a
+   clear distinction between ordinary astronomical events and textual sign or miracle events.
+5. Add regional geography and historical overlays for journeys, kingdoms, battles, boundaries,
+   vegetation, ice, volcanic disruption, flood coverage, and other non-point events.
+6. Expand the archive layer with museum links, media, manuscripts, archaeological notes, maps,
+   videos, and verse- or chapter-linked supplemental research.
+7. Explore immersive reconstruction views for historical places such as Jerusalem, the Temple Mount,
+   Rome, Ephesus, and other ancient locations.
+8. Scale performance with timeline virtualization, lazy-loaded data, level-of-detail rendering, and
+   focused tests for indexing, URL state, and astronomy fixtures.
 
 ## Development server
 
